@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VALIX Admin Panel</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body class="bg-slate-950 text-white font-sans">
+  <div id="root"></div>
+
+  <script type="text/babel" data-type="module">
+    const { useState, useEffect, useRef } = React;
+
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js';
+    import { getFirestore, doc, setDoc, getDoc } from 'https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js';
+    import { getAuth, signInAnonymously } from 'https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js';
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyBg8W_wQtL-MSTDCUQYuwDM8yJQcrmgYJo",
+      authDomain: "esports-4f486.firebaseapp.com",
+      databaseURL: "https://esports-4f486-default-rtdb.firebaseio.com",
+      projectId: "esports-4f486",
+      storageBucket: "esports-4f486.firebasestorage.app",
+      messagingSenderId: "17334130126",
+      appId: "1:17334130126:web:1ad0c0f092eeb06f66479f"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+
+    const draftDocRef = doc(db, 'artifacts', 'bgis_live_2026', 'public', 'data', 'tournament', 'admin_draft_data');
+    const liveDocRef = doc(db, 'artifacts', 'bgis_live_2026', 'public', 'data', 'tournament', 'live_data');
+
+    const compressImage = (file, callback) => {
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const MAX_SIZE = 512; 
+          let width = img.width; let height = img.height;
+          if (width > height) { if (width > MAX_SIZE) { height *= MAX_SIZE / width; width = MAX_SIZE; } } 
+          else { if (height > MAX_SIZE) { width *= MAX_SIZE / height; height = MAX_SIZE; } }
+          canvas.width = width; canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+          callback(canvas.toDataURL('image/webp', 0.8));
+        };
+        img.src = event.target.result;
+      };
+      reader.readAsDataURL(file);
+    };
+
+    const ImageUploadBox = ({ value, onChange, placeholder }) => {
+      const handleFile = (e) => { const file = e.target.files[0]; if (file) compressImage(file, onChange); };
+      return (
+        <div className="relative w-full flex items-center bg-slate-950 border border-slate-700 rounded p-1 overflow-hidden">
+          <img src={value || 'https://ui-avatars.com/api/?name=IMG&background=5C0000&color=FFD700'} alt="preview" className="w-8 h-8 rounded bg-white object-contain p-0.5 shrink-0" />
+          <input type="text" value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className="flex-1 bg-transparent border-none outline-none text-xs text-slate-400 px-2 w-full truncate" />
+          <div className="relative w-8 h-8 flex items-center justify-center bg-slate-800 rounded hover:bg-red-700 transition-colors shrink-0 cursor-pointer">
+             <i className="fas fa-upload text-white"></i>
+             <input type="file" accept="image/*" onChange={handleFile} className="absolute inset-0 opacity-0 cursor-pointer" title="Upload local image" />
+          </div>
+        </div>
+      );
+    };
+
+    const App = () => {
+      const [user, setUser] = useState(null);
+      const [isLoaded, setIsLoaded] = useState(false);
+      const [autoSaveStatus, setAutoSaveStatus] = useState('Loading secure data...');
+      const [syncState, setSyncState] = useState('idle');
+      const [confirmDialog, setConfirmDialog] = useState({ isOpen: false, title: "", message: "", onConfirm: null });
+      const [activeScreen, setActiveScreen] = useState(1);
+      const [activeTab, setActiveTab] = useState('screens'); 
+
+      const [timerState, setTimerState] = useState({ status: 'idle', remaining: 3600, endTime: null });
+      const [displayTime, setDisplayTime] = useState(3600);
+      const [inputMinutes, setInputMinutes] = useState(60);
+
+      const getDefaultTeams = () => Array.from({ length: 16 }, (_, i) => ({
+        id: `team_${new Date().getTime()}_${i}_${Math.random().toString(36).substr(2, 5)}`,
+        name: `TEAM ${String.fromCharCode(65 + (i % 26))}${i > 25 ? i : ''}`,
+        logo: `https://ui-avatars.com/api/?name=${String.fromCharCode(65 + (i % 26))}&background=5C0000&color=FFD700&rounded=true&bold=true`,
+        prevPoints: 0, totalKills: 0, totalPlacePts: 0, matches: 0, kills: 0, placementRank: "", placementPoints: 0, alive: 4, knocked: 0, eliminated: 0
+      }));
+
+      const [teamsData, setTeamsData] = useState(getDefaultTeams());
+      const [schedule, setSchedule] = useState([{ map: "ERANGEL", group: "LOBBY 1", time: "12:00 PM" }]);
+      const [standingsMeta, setStandingsMeta] = useState({ pointSubtitle: "MATCH 1 - LOBBY 1", overallSubtitle: "SEMI-FINALS | OVERALL" });
+      const [liveScreenMeta, setLiveScreenMeta] = useState({
+        tournamentName: "VALIX ARENA", dayTitle: "GRAND FINALS - DAY 1", matchTitle: "MATCH 1 : ERANGEL", teamListGroup1: "SLOTS 1-8", teamListGroup2: "SLOTS 9-16", tickerText: "WELCOME TO VALIX ARENA ESPORTS // PREPARE FOR THE ULTIMATE BATTLE",
+        prizeTotal: "5000", prize1: "2600", prize2: "1300", prize3: "800", prizeKill: "300", prizeInfo: "3 DAYS TOURNAMENT | 9 MATCHES"
+      });
+      const [topTeamStats, setTopTeamStats] = useState({
+        teamName: "VALIX ESPORTS", damage: 15676, heals: 743, knocks: 75, headshots: 2, avgSurv: "20:45",
+        player1: "", player2: "", player3: "", player4: ""
+      });
+      const [wwcdData, setWwcdData] = useState({
+        teamName: "VALIX ESPORTS", matchInfo: "MATCH 1 - ERANGEL",
+        p1Name: "PLAYER 1", p1Kills: 6, p1Dmg: 840, p2Name: "PLAYER 2", p2Kills: 7, p2Dmg: 920, p3Name: "PLAYER 3", p3Kills: 7, p3Dmg: 1050, p4Name: "PLAYER 4", p4Kills: 2, p4Dmg: 350
+      });
+      
+      const [championData, setChampionData] = useState({
+        teamName: "VALIX ESPORTS", prize: "2600", teamLogo: "",
+        p1Name: "IGL NAME", p1Img: "", p2Name: "FRAGGER 1", p2Img: "", p3Name: "FRAGGER 2", p3Img: "", p4Name: "SUPPORT", p4Img: ""
+      });
+
+      useEffect(() => {
+        const initAuth = async () => {
+          try { await signInAnonymously(auth); setUser(auth.currentUser); } 
+          catch (error) { setUser({ uid: 'unauthenticated' }); }
+        };
+        initAuth();
+      }, []);
+
+      useEffect(() => {
+        if (!user) return;
+        let isMounted = true;
+        const fetchInitialData = async () => {
+          try {
+            let snap = await getDoc(draftDocRef);
+            if (!snap.exists()) snap = await getDoc(liveDocRef);
+            if (snap.exists() && isMounted) {
+              const data = snap.data();
+              if(data.activeScreen) setActiveScreen(data.activeScreen);
+              if(data.teamsData && data.teamsData.length > 0) setTeamsData(data.teamsData);
+              if(data.schedule) setSchedule(data.schedule);
+              if(data.standingsMeta) setStandingsMeta(data.standingsMeta);
+              if(data.liveScreenMeta) setLiveScreenMeta(data.liveScreenMeta);
+              if(data.topTeamStats) setTopTeamStats(data.topTeamStats);
+              if(data.wwcdData) setWwcdData(data.wwcdData);
+              if(data.championData) setChampionData(data.championData);
+              if(data.timerState) setTimerState(data.timerState);
+            }
+            setTimeout(() => { if(isMounted) { setIsLoaded(true); setAutoSaveStatus('Data securely loaded.'); } }, 2000);
+          } catch (error) { if(isMounted) setIsLoaded(true); }
+        };
+        fetchInitialData();
+        return () => { isMounted = false; };
+      }, [user]);
+
+      useEffect(() => {
+        let interval;
+        if (timerState.status === 'playing') {
+          const calcTime = () => Math.max(0, Math.floor((timerState.endTime - Date.now()) / 1000));
+          setDisplayTime(calcTime());
+          interval = setInterval(() => setDisplayTime(calcTime()), 500);
+        } else {
+          setDisplayTime(timerState.remaining);
+        }
+        return () => clearInterval(interval);
+      }, [timerState]);
+
+      // NEW: Auto-Switch to Live HUD (Screen 8) when timer hits 0
+      useEffect(() => {
+        if (timerState.status === 'playing' && displayTime === 0) {
+          if (activeScreen !== 8) {
+            handleScreenChange(8);
+          }
+          syncTimerToDb({ status: 'idle', remaining: 0, endTime: null });
+        }
+      }, [displayTime, timerState.status, activeScreen]);
+
+      useEffect(() => {
+        if (!isLoaded || !user) return;
+        setAutoSaveStatus('Saving changes...');
+        const timer = setTimeout(() => {
+          setDoc(draftDocRef, { activeScreen, teamsData, schedule, standingsMeta, liveScreenMeta, topTeamStats, wwcdData, championData, timerState, updatedAt: new Date().getTime() }, { merge: true })
+          .then(() => setAutoSaveStatus('Cloud Draft Auto-Saved ✓'))
+          .catch(() => setAutoSaveStatus('Error saving data!'));
+        }, 1000);
+        return () => clearTimeout(timer);
+      }, [activeScreen, teamsData, schedule, standingsMeta, liveScreenMeta, topTeamStats, wwcdData, championData, timerState, isLoaded, user]);
+
+      const formatTime = (seconds) => {
+        const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+        const s = (seconds % 60).toString().padStart(2, '0');
+        return `${m}:${s}`;
+      };
+
+      const syncTimerToDb = (newState) => {
+        setTimerState(newState);
+        if (user) {
+          setDoc(liveDocRef, { timerState: newState }, { merge: true });
+          setDoc(draftDocRef, { timerState: newState }, { merge: true });
+        }
+      };
+
+      const handleSetTimer = () => {
+        const mins = parseInt(inputMinutes);
+        if (isNaN(mins) || mins < 0) return;
+        syncTimerToDb({ status: 'idle', remaining: mins * 60, endTime: null });
+      };
+
+      const handleStartTimer = () => {
+        if (timerState.status === 'playing' || timerState.remaining <= 0) return;
+        syncTimerToDb({ status: 'playing', remaining: timerState.remaining, endTime: Date.now() + (timerState.remaining * 1000) });
+      };
+
+      const handlePauseTimer = () => {
+        if (timerState.status !== 'playing') return;
+        const timeLeft = Math.max(0, Math.floor((timerState.endTime - Date.now()) / 1000));
+        syncTimerToDb({ status: 'paused', remaining: timeLeft, endTime: null });
+      };
+
+      const syncDataToOBS = () => {
+        if (!user) return alert("Waiting for connection...");
+        setSyncState('syncing');
+        setDoc(liveDocRef, { teamsData, schedule, standingsMeta, liveScreenMeta, topTeamStats, wwcdData, championData, timerState, updatedAt: new Date().getTime() }, { merge: true })
+        .then(() => { setSyncState('success'); setTimeout(() => { setSyncState('idle'); }, 1500); })
+        .catch(() => { alert("Sync failed!"); setSyncState('idle'); });
+      };
+
+      const handleScreenChange = (screenId) => {
+        setActiveScreen(screenId); 
+        if (user) {
+          setDoc(liveDocRef, { activeScreen: screenId, updatedAt: new Date().getTime() }, { merge: true });
+          setDoc(draftDocRef, { activeScreen: screenId, updatedAt: new Date().getTime() }, { merge: true });
+        }
+      };
+
+      const factoryResetData = () => {
+        setConfirmDialog({
+          isOpen: true, title: "🚨 FACTORY RESET 🚨",
+          message: "Are you ABSOLUTELY sure you want to permanently DELETE and RESET all teams and points data? This CANNOT be undone!",
+          onConfirm: () => {
+            const defaults = getDefaultTeams(); setTeamsData(defaults);
+            if (user) { setDoc(draftDocRef, { teamsData: defaults }, { merge: true }); setDoc(liveDocRef, { teamsData: defaults }, { merge: true }); }
+          }
+        });
+      };
+
+      const getPlacementPoints = (rank) => {
+        const r = parseInt(rank);
+        if (isNaN(r) || r < 1 || r > 16) return 0;
+        const pts = {1:10, 2:6, 3:5, 4:4, 5:3, 6:2, 7:1, 8:1};
+        return pts[r] || 0; 
+      };
+
+      const handleLiveScoring = (id, field, value) => {
+        setTeamsData(teamsData.map(team => {
+          if (team.id !== id) return team;
+          const updatedTeam = { ...team };
+          if (field === 'placementRank') { updatedTeam.placementRank = value; updatedTeam.placementPoints = getPlacementPoints(value); } 
+          else { let val = parseInt(value) || 0; updatedTeam[field] = val < 0 ? 0 : val; }
+          return updatedTeam;
+        }));
+      };
+
+      const handleTeamGlobalChange = (id, field, value) => {
+        setTeamsData(teamsData.map(team => {
+          if (team.id !== id) return team;
+          const updatedTeam = { ...team };
+          if (field === 'name' || field === 'logo') updatedTeam[field] = value;
+          else updatedTeam[field] = parseInt(value) || 0;
+          
+          if (field === 'totalKills' || field === 'totalPlacePts') {
+            updatedTeam.prevPoints = (field === 'totalKills' ? (parseInt(value)||0) : (team.totalKills || 0)) + 
+                                     (field === 'totalPlacePts' ? (parseInt(value)||0) : (team.totalPlacePts || 0));
+          }
+          return updatedTeam;
+        }));
+      };
+
+      const addNewTeam = () => {
+        setTeamsData(prev => [...prev, {
+            id: `team_${new Date().getTime()}_${Math.random().toString(36).substr(2, 5)}`, name: `NEW TEAM ${prev.length + 1}`,
+            logo: `https://ui-avatars.com/api/?name=NT&background=5C0000&color=FFD700`,
+            prevPoints: 0, totalKills: 0, totalPlacePts: 0, matches: 0, kills: 0, placementRank: "", placementPoints: 0, alive: 4, knocked: 0, eliminated: 0
+        }]);
+      };
+
+      const deleteTeam = (idToRemove) => {
+        setConfirmDialog({ isOpen: true, title: "Delete Team?", message: "Are you sure you want to delete this team?", onConfirm: () => setTeamsData(p => p.filter(t => t.id !== idToRemove)) });
+      };
+
+      const clearCurrentMatchData = () => {
+        setConfirmDialog({ isOpen: true, title: "Reset Match Data?", message: "Reset ONLY the CURRENT MATCH kills/placements to zero?", onConfirm: () => setTeamsData(p => p.map(t => ({...t, kills: 0, placementRank: "", placementPoints: 0, alive: 4, knocked: 0, eliminated: 0}))) });
+      };
+
+      const commitMatchToTotal = () => {
+        setConfirmDialog({ isOpen: true, title: "Commit Points?", message: "Match kills and placement points will be added to Overall Total.",
+          onConfirm: () => setTeamsData(p => p.map(t => ({ ...t, prevPoints: (t.prevPoints || 0) + (t.kills || 0) + (t.placementPoints || 0), totalKills: (t.totalKills || 0) + (t.kills || 0), totalPlacePts: (t.totalPlacePts || 0) + (t.placementPoints || 0), matches: (t.matches || 0) + 1, kills: 0, placementRank: "", placementPoints: 0, alive: 4, knocked: 0, eliminated: 0 })))
+        });
+      };
+
+      const sortedIds = [...teamsData].map(team => ({ id: team.id, currentTotal: (team.prevPoints || 0) + (team.kills || 0) + (team.placementPoints || 0), kills: team.kills || 0, name: team.name })).sort((a, b) => b.currentTotal - a.currentTotal || b.kills - a.kills || a.name.localeCompare(b.name)).map(t => t.id);
+
+      return (
+        <div className="flex h-screen relative">
+          {confirmDialog.isOpen && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm">
+              <div className="bg-slate-900 border border-slate-700 p-8 rounded-xl shadow-[0_0_50px_rgba(0,0,0,0.8)] max-w-md w-full">
+                <h3 className={`text-2xl font-black mb-3 ${confirmDialog.title.includes('RESET') ? 'text-red-500' : 'text-yellow-500'}`}>{confirmDialog.title}</h3>
+                <p className="text-slate-300 mb-8 font-bold leading-relaxed">{confirmDialog.message}</p>
+                <div className="flex justify-end gap-4">
+                  <button onClick={() => setConfirmDialog({isOpen: false})} className="px-6 py-2.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg font-bold">Cancel</button>
+                  <button onClick={() => { confirmDialog.onConfirm(); setConfirmDialog({isOpen: false}); }} className="px-6 py-2.5 bg-red-700 hover:bg-red-600 text-white rounded-lg font-bold">Confirm Action</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* SIDEBAR */}
+          <div className="w-64 bg-slate-900 border-r border-slate-800 flex flex-col justify-between">
+            <div className="p-4 flex flex-col gap-2 overflow-y-auto">
+              <h1 className="text-xl font-black text-yellow-500 flex items-center gap-3 mb-6"><i className="fas fa-cogs"></i> ADMIN SUITE</h1>
+              <button onClick={() => setActiveTab('screens')} className={`flex items-center gap-3 p-2 rounded-lg font-bold text-sm ${activeTab === 'screens' ? 'bg-red-700 text-white' : 'text-slate-400 hover:bg-slate-800'}`}><i className="fas fa-desktop"></i> Live Screens</button>
+              <button onClick={() => setActiveTab('point_standings')} className={`flex items-center gap-3 p-2 rounded-lg font-bold text-sm ${activeTab === 'point_standings' ? 'bg-red-700 text-white' : 'text-slate-400 hover:bg-slate-800'}`}><i className="fas fa-chart-line"></i> Live Scoring</button>
+              <button onClick={() => setActiveTab('overall_standings')} className={`flex items-center gap-3 p-2 rounded-lg font-bold text-sm ${activeTab === 'overall_standings' ? 'bg-red-700 text-white' : 'text-slate-400 hover:bg-slate-800'}`}><i className="fas fa-users"></i> Teams & Setup</button>
+              <button onClick={() => setActiveTab('schedule')} className={`flex items-center gap-3 p-2 rounded-lg font-bold text-sm ${activeTab === 'schedule' ? 'bg-red-700 text-white' : 'text-slate-400 hover:bg-slate-800'}`}><i className="fas fa-calendar-alt"></i> Schedule</button>
+              <button onClick={() => setActiveTab('top_team')} className={`flex items-center gap-3 p-2 rounded-lg font-bold text-sm ${activeTab === 'top_team' ? 'bg-red-700 text-white' : 'text-slate-400 hover:bg-slate-800'}`}><i className="fas fa-medal"></i> Top Team</button>
+              <button onClick={() => setActiveTab('wwcd')} className={`flex items-center gap-3 p-2 rounded-lg font-bold text-sm ${activeTab === 'wwcd' ? 'bg-yellow-600 text-black' : 'text-slate-400 hover:bg-slate-800'}`}><i className="fas fa-crown"></i> WWCD</button>
+              <button onClick={() => setActiveTab('champions')} className={`flex items-center gap-3 p-2 rounded-lg font-bold text-sm ${activeTab === 'champions' ? 'bg-[#FFD700] text-[#3a0000]' : 'text-slate-400 hover:bg-slate-800'}`}><i className="fas fa-trophy"></i> Champions</button>
+            </div>
+            <div className="p-4 border-t border-slate-800 bg-slate-900/50 flex flex-col gap-3">
+              <button onClick={syncDataToOBS} disabled={!isLoaded || syncState === 'syncing'} className={`w-full font-bold p-3 rounded-xl flex items-center justify-center transition-all shadow-[0_0_15px_rgba(220,38,38,0.4)] text-sm disabled:opacity-50 overflow-hidden ${syncState === 'syncing' ? 'bg-yellow-500 text-black' : syncState === 'success' ? 'bg-green-500 text-white' : 'bg-red-700 hover:bg-red-600 text-white'}`}>
+                {syncState === 'idle' && <><i className="fas fa-save mr-2"></i> Sync to OBS</>}
+                {syncState === 'syncing' && <><i className="fas fa-bolt mr-2 animate-pulse"></i> Pushing...</>}
+                {syncState === 'success' && <span>Live on OBS! ✓</span>}
+              </button>
+              <button onClick={factoryResetData} className="w-full bg-slate-950 border border-slate-800 hover:bg-red-900 text-slate-400 hover:text-white font-bold p-2.5 rounded-xl flex items-center justify-center transition-all text-xs">
+                <i className="fas fa-trash-alt mr-2"></i> Factory Reset Data
+              </button>
+              <div className="flex items-center justify-center gap-2 mt-1 px-2 py-1.5 bg-slate-950 rounded-lg border border-slate-800">
+                 <div className={`w-2 h-2 rounded-full ${autoSaveStatus.includes('Error') ? 'bg-red-500' : autoSaveStatus.includes('Saving') ? 'bg-yellow-400 animate-ping' : autoSaveStatus.includes('Loading') ? 'bg-orange-500 animate-pulse' : 'bg-green-500'}`}></div>
+                 <span className="text-[10px] font-mono text-slate-400 truncate">{autoSaveStatus}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* MAIN CONTENT */}
+          <div className="flex-1 p-8 overflow-y-auto bg-slate-950">
+            <div className="max-w-[1200px] mx-auto">
+              
+              {/* SCREENS TAB */}
+              {activeTab === 'screens' && (
+                <div>
+                  <div className="flex items-center gap-3 mb-4 border-b border-slate-800 pb-2">
+                     <h2 className="text-2xl font-black text-white">Display Controls</h2>
+                     <span className="bg-green-900/50 text-green-400 px-3 py-1 rounded text-xs font-bold"><i className="fas fa-desktop"></i> Click changes screen</span>
+                  </div>
+                  
+                  {/* MASTER TIMER CONTROL */}
+                  <div className="bg-slate-900 border border-yellow-500/30 p-5 rounded-xl flex items-center justify-between mb-8 shadow-[0_0_20px_rgba(255,215,0,0.05)]">
+                     <div className="flex items-center gap-6">
+                        <div className={`text-5xl font-black font-mono tabular-nums tracking-wider drop-shadow-md w-32 text-center transition-colors ${displayTime <= 300 && displayTime > 0 ? 'text-red-500 animate-pulse' : 'text-yellow-500'}`}>
+                           {formatTime(displayTime)}
+                        </div>
+                        <div className="flex flex-col gap-1 border-l border-slate-700 pl-6">
+                          <label className="text-xs text-slate-400 font-bold uppercase tracking-widest">Set Custom Time (Mins)</label>
+                          <div className="flex gap-2 mt-1">
+                            <input type="number" value={inputMinutes} onChange={(e) => setInputMinutes(e.target.value)} className="w-24 bg-slate-950 border border-slate-700 text-center text-white font-bold p-2 rounded outline-none focus:border-yellow-500 transition-colors" />
+                            <button onClick={handleSetTimer} className="bg-slate-700 hover:bg-slate-600 text-white px-5 py-2 rounded font-bold transition-colors">SET</button>
+                          </div>
+                        </div>
+                     </div>
+                     <div className="flex gap-4 border-l border-slate-700 pl-6">
+                        {timerState.status !== 'playing' ? (
+                            <button onClick={handleStartTimer} className="bg-green-600 hover:bg-green-500 text-white px-8 py-3 rounded-lg font-black tracking-widest uppercase transition-all shadow-[0_0_15px_rgba(34,197,94,0.3)] flex items-center gap-3 text-lg"><i className="fas fa-play"></i> START</button>
+                        ) : (
+                            <button onClick={handlePauseTimer} className="bg-yellow-600 hover:bg-yellow-500 text-white px-8 py-3 rounded-lg font-black tracking-widest uppercase transition-all shadow-[0_0_15px_rgba(202,138,4,0.3)] flex items-center gap-3 text-lg"><i className="fas fa-pause"></i> PAUSE</button>
+                        )}
+                     </div>
+                  </div>
+
+                  <div className="grid grid-cols-4 gap-4 mb-10">
+                    {[ {id: 1, name: "Countdown"}, {id: 2, name: "Teams List"}, {id: 3, name: "Recap"}, {id: 4, name: "Live Standings"}, {id: 5, name: "Schedule"}, {id: 6, name: "Prize Pool"}, {id: 7, name: "🏆 Champions"}, {id: 8, name: "Live HUD"}, {id: 9, name: "WWCD"}, {id: 10, name: "Match Standings"}, {id: 11, name: "Overall Standings"} ].map(btn => (
+                      <button key={btn.id} onClick={() => handleScreenChange(btn.id)} className={`h-20 rounded-xl text-lg font-bold transition-all ${activeScreen === btn.id ? 'bg-red-700 text-white shadow-[0_0_20px_rgba(220,38,38,0.5)] border-2 border-red-400 scale-105 z-10' : 'bg-slate-900 text-slate-400 border border-slate-800 hover:bg-slate-800 hover:scale-105'}`}>
+                        {btn.name}
+                      </button>
+                    ))}
+                  </div>
+                  <h3 className="text-xl font-black mb-4 text-yellow-500 border-b border-slate-800 pb-2">Live Meta Texts</h3>
+                  <div className="grid grid-cols-2 gap-4 bg-slate-900 p-6 rounded-xl border border-slate-800">
+                    <div><label className="text-xs text-slate-500 font-bold block mb-1">Tournament Title</label><input type="text" value={liveScreenMeta.tournamentName} onChange={(e) => setLiveScreenMeta({...liveScreenMeta, tournamentName: e.target.value})} className="w-full bg-slate-950 rounded p-2 text-white outline-none" /></div>
+                    <div className="col-span-2"><label className="text-xs text-slate-500 font-bold block mb-1">Scrolling Ticker Text</label><input type="text" value={liveScreenMeta.tickerText} onChange={(e) => setLiveScreenMeta({...liveScreenMeta, tickerText: e.target.value})} className="w-full bg-slate-950 rounded p-2 text-yellow-400 font-bold outline-none border border-yellow-500/50" /></div>
+                    <div><label className="text-xs text-slate-500 font-bold block mb-1">HUD Day Title</label><input type="text" value={liveScreenMeta.dayTitle} onChange={(e) => setLiveScreenMeta({...liveScreenMeta, dayTitle: e.target.value})} className="w-full bg-slate-950 rounded p-2 text-white outline-none" /></div>
+                    <div><label className="text-xs text-slate-500 font-bold block mb-1">HUD Match Title</label><input type="text" value={liveScreenMeta.matchTitle} onChange={(e) => setLiveScreenMeta({...liveScreenMeta, matchTitle: e.target.value})} className="w-full bg-slate-950 rounded p-2 text-white outline-none" /></div>
+                    <div><label className="text-xs text-slate-500 font-bold block mb-1">Teams List Part 1</label><input type="text" value={liveScreenMeta.teamListGroup1} onChange={(e) => setLiveScreenMeta({...liveScreenMeta, teamListGroup1: e.target.value})} className="w-full bg-slate-950 rounded p-2 text-yellow-500 outline-none" /></div>
+                    <div><label className="text-xs text-slate-500 font-bold block mb-1">Teams List Part 2</label><input type="text" value={liveScreenMeta.teamListGroup2} onChange={(e) => setLiveScreenMeta({...liveScreenMeta, teamListGroup2: e.target.value})} className="w-full bg-slate-950 rounded p-2 text-yellow-500 outline-none" /></div>
+                    
+                    <div className="col-span-2 mt-4"><h3 className="text-lg font-black text-yellow-500 border-b border-slate-800 pb-2 mb-2">Prize Pool Details</h3></div>
+                    <div><label className="text-xs text-slate-500 font-bold block mb-1">Total Prize Pool Amount</label><input type="number" value={liveScreenMeta.prizeTotal} onChange={(e) => setLiveScreenMeta({...liveScreenMeta, prizeTotal: e.target.value})} className="w-full bg-slate-950 rounded p-2 text-yellow-500 font-bold outline-none border border-slate-800" /></div>
+                    <div><label className="text-xs text-slate-500 font-bold block mb-1">Prize Subtitle Info</label><input type="text" value={liveScreenMeta.prizeInfo} onChange={(e) => setLiveScreenMeta({...liveScreenMeta, prizeInfo: e.target.value})} className="w-full bg-slate-950 rounded p-2 text-white outline-none border border-slate-800" /></div>
+                    <div><label className="text-xs text-slate-500 font-bold block mb-1">1st Prize</label><input type="number" value={liveScreenMeta.prize1} onChange={(e) => setLiveScreenMeta({...liveScreenMeta, prize1: e.target.value})} className="w-full bg-slate-950 rounded p-2 text-white outline-none border border-slate-800" /></div>
+                    <div><label className="text-xs text-slate-500 font-bold block mb-1">2nd Prize</label><input type="number" value={liveScreenMeta.prize2} onChange={(e) => setLiveScreenMeta({...liveScreenMeta, prize2: e.target.value})} className="w-full bg-slate-950 rounded p-2 text-white outline-none border border-slate-800" /></div>
+                    <div><label className="text-xs text-slate-500 font-bold block mb-1">3rd Prize</label><input type="number" value={liveScreenMeta.prize3} onChange={(e) => setLiveScreenMeta({...liveScreenMeta, prize3: e.target.value})} className="w-full bg-slate-950 rounded p-2 text-white outline-none border border-slate-800" /></div>
+                    <div><label className="text-xs text-slate-500 font-bold block mb-1">Highest Kill Prize</label><input type="number" value={liveScreenMeta.prizeKill} onChange={(e) => setLiveScreenMeta({...liveScreenMeta, prizeKill: e.target.value})} className="w-full bg-slate-950 rounded p-2 text-red-400 font-bold outline-none border border-slate-800" /></div>
+                  </div>
+                </div>
+              )}
+
+              {/* POINT STANDINGS TAB */}
+              {activeTab === 'point_standings' && (
+                <div>
+                   <div className="flex justify-between mb-4">
+                      <h2 className="text-2xl font-black text-yellow-500">Live Scoring</h2>
+                      <div className="flex gap-2">
+                        <button onClick={clearCurrentMatchData} className="bg-slate-800 hover:bg-slate-700 px-3 py-1 rounded text-sm">Reset Match Data</button>
+                        <button onClick={commitMatchToTotal} className="bg-red-700 hover:bg-red-600 px-3 py-1 rounded text-sm font-bold">Commit Match</button>
+                      </div>
+                   </div>
+                   <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden text-sm pb-8">
+                      <div className="bg-red-950/80 border-b border-red-900 p-2 text-center text-[11px] text-red-200 font-bold">
+                         <i className="fas fa-bolt text-yellow-400 mr-2"></i> VALIX POINT SYSTEM: 1st(10), 2nd(6), 3rd(5), 4th(4), 5th(3), 6th(2), 7-8th(1) | 1 Finish = 1 Pt
+                      </div>
+                      <div className="flex bg-slate-950 p-2 font-bold text-slate-400 text-center items-center text-xs">
+                         <div className="w-48 text-left pl-2">Team</div><div className="w-16">Kills</div><div className="w-24">Rank</div><div className="w-36">Status (A/K/E)</div>
+                      </div>
+                      {teamsData.map((t) => {
+                        const currentRank = sortedIds.indexOf(t.id) + 1;
+                        return (
+                        <div key={t.id} className="flex items-center p-2 border-t border-slate-800 hover:bg-slate-800/50">
+                          <div className="w-48 pl-2 flex items-center gap-2"><span className="bg-slate-800 text-yellow-500 px-2 py-0.5 rounded text-xs font-black">#{currentRank}</span><span className="font-bold truncate">{t.name}</span></div>
+                          <input type="number" value={t.kills} onChange={e=>handleLiveScoring(t.id, 'kills', e.target.value)} className="w-16 bg-slate-950 border border-slate-700 p-1 text-center mr-2 rounded outline-none"/>
+                          <div className="w-24 flex items-center gap-1 mr-2"><input type="number" value={t.placementRank} onChange={e=>handleLiveScoring(t.id, 'placementRank', e.target.value)} className="w-12 bg-slate-950 border border-slate-700 p-1 text-center rounded text-yellow-400 outline-none"/><span className="text-yellow-500 text-[10px] font-black w-8 bg-yellow-900/30 rounded px-1 py-0.5">+{t.placementPoints}</span></div>
+                          <div className="w-36 flex gap-1 mr-2"><input type="number" min="0" max="4" value={t.alive} onChange={e=>handleLiveScoring(t.id, 'alive', e.target.value)} className="w-10 bg-green-900/50 border border-green-700 p-1 text-center rounded text-green-400 outline-none"/><input type="number" min="0" max="4" value={t.knocked} onChange={e=>handleLiveScoring(t.id, 'knocked', e.target.value)} className="w-10 bg-yellow-900/50 border border-yellow-700 p-1 text-center rounded text-yellow-400 outline-none"/><input type="number" min="0" max="4" value={t.eliminated} onChange={e=>handleLiveScoring(t.id, 'eliminated', e.target.value)} className="w-10 bg-red-900/50 border border-red-700 p-1 text-center rounded text-red-400 outline-none"/></div>
+                        </div>
+                      )})}
+                   </div>
+                </div>
+              )}
+
+              {/* OVERALL STANDINGS TAB */}
+              {activeTab === 'overall_standings' && (
+                <div>
+                   <div className="flex justify-between items-center mb-2">
+                      <h2 className="text-2xl font-black text-yellow-500">Teams Setup & Overall Standings</h2>
+                      <button onClick={addNewTeam} className="bg-red-700 hover:bg-red-600 text-white px-4 py-2 rounded-lg font-bold text-sm"><i className="fas fa-plus mr-2"></i>Add Team</button>
+                   </div>
+                   <input type="text" value={standingsMeta.overallSubtitle} onChange={(e)=>setStandingsMeta({...standingsMeta, overallSubtitle: e.target.value})} className="w-full bg-slate-900 p-2 rounded mb-4 text-white font-bold outline-none" placeholder="Subtitle"/>
+                   <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden text-sm pb-8">
+                      <div className="flex bg-slate-950 p-2 font-bold text-slate-400 text-center items-center">
+                        <div className="w-48 text-left pl-4">Team Name</div><div className="flex-1">Logo</div><div className="w-16">Tot Kills</div><div className="w-16">Tot Pls Pts</div><div className="w-20 text-yellow-500">Total Pts</div><div className="w-16">Matches</div><div className="w-10"></div>
+                      </div>
+                      {teamsData.map((t) => (
+                        <div key={t.id} className="flex items-center p-2 border-t border-slate-800 gap-2">
+                          <input type="text" value={t.name} onChange={e=>handleTeamGlobalChange(t.id, 'name', e.target.value)} className="w-48 bg-slate-950 p-1 rounded font-bold outline-none ml-2"/>
+                          <div className="flex-1"><ImageUploadBox value={t.logo} onChange={(val) => handleTeamGlobalChange(t.id, 'logo', val)} placeholder="Logo URL" /></div>
+                          <input type="number" value={t.totalKills || 0} onChange={e=>handleTeamGlobalChange(t.id, 'totalKills', e.target.value)} className="w-16 bg-slate-950 p-1 text-center rounded text-slate-300 outline-none"/>
+                          <input type="number" value={t.totalPlacePts || 0} onChange={e=>handleTeamGlobalChange(t.id, 'totalPlacePts', e.target.value)} className="w-16 bg-slate-950 p-1 text-center rounded text-slate-300 outline-none"/>
+                          <input type="number" value={t.prevPoints || 0} onChange={e=>handleTeamGlobalChange(t.id, 'prevPoints', e.target.value)} className="w-20 bg-slate-950 p-1 text-center rounded text-yellow-500 font-bold outline-none"/>
+                          <input type="number" value={t.matches} onChange={e=>handleTeamGlobalChange(t.id, 'matches', e.target.value)} className="w-16 bg-slate-950 p-1 text-center rounded outline-none"/>
+                          <button onClick={() => deleteTeam(t.id)} className="w-10 text-slate-500 hover:text-red-500 p-1 rounded flex justify-center"><i className="fas fa-trash-alt"></i></button>
+                        </div>
+                      ))}
+                   </div>
+                </div>
+              )}
+
+              {/* SCHEDULE TAB */}
+              {activeTab === 'schedule' && (
+                <div className="bg-slate-900 p-6 rounded-xl border border-slate-800">
+                  <h2 className="text-xl font-black mb-4 text-yellow-500">Tournament Schedule</h2>
+                  <button onClick={()=>setSchedule([...schedule, {map:"", group:"", time:""}])} className="bg-slate-800 p-2 rounded mb-4 text-sm font-bold text-white"><i className="fas fa-plus mr-2"></i>Add Match</button>
+                  {schedule.map((s, i) => (
+                    <div key={i} className="flex gap-2 mb-2">
+                      <input type="text" value={s.map} onChange={e=>{const ns=[...schedule]; ns[i].map=e.target.value; setSchedule(ns)}} className="bg-slate-950 p-2 rounded w-full border border-slate-700 outline-none" placeholder="Map"/>
+                      <input type="text" value={s.group} onChange={e=>{const ns=[...schedule]; ns[i].group=e.target.value; setSchedule(ns)}} className="bg-slate-950 p-2 rounded w-full border border-slate-700 outline-none" placeholder="Lobby"/>
+                      <input type="text" value={s.time} onChange={e=>{const ns=[...schedule]; ns[i].time=e.target.value; setSchedule(ns)}} className="bg-slate-950 p-2 rounded w-full border border-slate-700 outline-none" placeholder="Time"/>
+                      <button onClick={() => setSchedule(schedule.filter((_, idx) => idx !== i))} className="text-slate-500 hover:text-red-500 p-3"><i className="fas fa-trash-alt"></i></button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* TOP TEAM TAB */}
+              {activeTab === 'top_team' && (
+                <div className="bg-slate-900 p-6 rounded-xl border border-slate-800">
+                   <h2 className="text-xl font-black mb-4 text-yellow-500">Top Team Banner Setup</h2>
+                   <div className="grid grid-cols-2 gap-4 mb-4">
+                     <div><label className="text-xs text-slate-500 block mb-1">Team Name</label><input type="text" value={topTeamStats.teamName} onChange={e=>setTopTeamStats({...topTeamStats, teamName: e.target.value})} className="w-full bg-slate-950 p-2 rounded text-white font-bold outline-none"/></div>
+                     <div><label className="text-xs text-slate-500 block mb-1">Avg Surv</label><input type="text" value={topTeamStats.avgSurv} onChange={e=>setTopTeamStats({...topTeamStats, avgSurv: e.target.value})} className="w-full bg-slate-950 p-2 rounded text-white outline-none"/></div>
+                   </div>
+                   <div className="grid grid-cols-4 gap-4 mb-4">
+                     <div><label className="text-xs text-slate-500 block mb-1">Damage</label><input type="number" value={topTeamStats.damage} onChange={e=>setTopTeamStats({...topTeamStats, damage: parseInt(e.target.value)||0})} className="w-full bg-slate-950 p-2 rounded outline-none"/></div>
+                     <div><label className="text-xs text-slate-500 block mb-1">Heals</label><input type="number" value={topTeamStats.heals} onChange={e=>setTopTeamStats({...topTeamStats, heals: parseInt(e.target.value)||0})} className="w-full bg-slate-950 p-2 rounded outline-none"/></div>
+                     <div><label className="text-xs text-slate-500 block mb-1">Knocks</label><input type="number" value={topTeamStats.knocks} onChange={e=>setTopTeamStats({...topTeamStats, knocks: parseInt(e.target.value)||0})} className="w-full bg-slate-950 p-2 rounded outline-none"/></div>
+                     <div><label className="text-xs text-slate-500 block mb-1">Headshots</label><input type="number" value={topTeamStats.headshots} onChange={e=>setTopTeamStats({...topTeamStats, headshots: parseInt(e.target.value)||0})} className="w-full bg-slate-950 p-2 rounded outline-none"/></div>
+                   </div>
+                </div>
+              )}
+
+              {/* WWCD TAB */}
+              {activeTab === 'wwcd' && (
+                 <div className="bg-slate-900 p-6 rounded-xl border border-yellow-500/50 shadow-lg">
+                    <h2 className="text-xl font-black mb-4 text-yellow-500">WWCD Screen Data</h2>
+                    <div className="flex gap-4 mb-4">
+                      <input type="text" placeholder="Team Name" value={wwcdData.teamName} onChange={e=>setWwcdData({...wwcdData, teamName: e.target.value})} className="w-1/2 bg-slate-950 p-3 rounded font-black text-xl text-yellow-400 outline-none"/>
+                      <input type="text" placeholder="Match Info" value={wwcdData.matchInfo} onChange={e=>setWwcdData({...wwcdData, matchInfo: e.target.value})} className="w-1/2 bg-slate-950 p-3 rounded font-bold outline-none"/>
+                    </div>
+                    <div className="grid grid-cols-4 gap-4">
+                      {['p1', 'p2', 'p3', 'p4'].map(p => (
+                        <div key={p} className="bg-slate-950 p-3 rounded border border-slate-800">
+                          <input type="text" placeholder="Name" value={wwcdData[`${p}Name`]} onChange={e=>setWwcdData({...wwcdData, [`${p}Name`]: e.target.value})} className="w-full bg-slate-900 p-2 rounded mb-2 text-sm font-bold outline-none"/>
+                          <div className="flex gap-2">
+                             <input type="number" placeholder="Kills" value={wwcdData[`${p}Kills`]} onChange={e=>setWwcdData({...wwcdData, [`${p}Kills`]: parseInt(e.target.value)||0})} className="w-1/2 bg-slate-900 p-1 text-center rounded text-sm outline-none"/>
+                             <input type="number" placeholder="Dmg" value={wwcdData[`${p}Dmg`]} onChange={e=>setWwcdData({...wwcdData, [`${p}Dmg`]: parseInt(e.target.value)||0})} className="w-1/2 bg-slate-900 p-1 text-center rounded text-sm outline-none"/>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                 </div>
+              )}
+
+              {/* CHAMPIONS TAB */}
+              {activeTab === 'champions' && (
+                 <div className="bg-slate-900 p-6 rounded-xl border border-yellow-500/50 shadow-[0_0_20px_rgba(255,215,0,0.1)]">
+                    <h2 className="text-xl font-black mb-4 text-[#FFD700]"><i className="fas fa-trophy mr-2"></i>Tournament Champions Setup</h2>
+                    <div className="flex gap-4 mb-6">
+                      <div className="flex-1">
+                        <label className="text-xs text-slate-500 font-bold block mb-1">Champion Team Name</label>
+                        <input type="text" value={championData.teamName} onChange={e=>setChampionData({...championData, teamName: e.target.value})} className="w-full bg-slate-950 p-3 rounded font-black text-2xl text-yellow-400 outline-none border border-[#FFD700]/30"/>
+                      </div>
+                      <div className="w-1/3">
+                        <label className="text-xs text-slate-500 font-bold block mb-1">Winnings Amount</label>
+                        <input type="number" value={championData.prize} onChange={e=>setChampionData({...championData, prize: e.target.value})} className="w-full bg-slate-950 p-3 rounded font-bold text-white outline-none border border-slate-700"/>
+                      </div>
+                      <div className="w-1/3">
+                        <label className="text-xs text-slate-500 font-bold block mb-1">Team Logo</label>
+                        <ImageUploadBox value={championData.teamLogo} onChange={val=>setChampionData({...championData, teamLogo: val})} placeholder="Upload Team Logo" />
+                      </div>
+                    </div>
+                    
+                    <h3 className="text-sm font-bold text-slate-400 mb-3">Player Photos & Names (Full Size Profile Images)</h3>
+                    <div className="grid grid-cols-4 gap-6">
+                      {['p1', 'p2', 'p3', 'p4'].map(p => (
+                        <div key={p} className="bg-slate-950 p-4 rounded-lg border border-slate-800 flex flex-col gap-3">
+                          <div>
+                             <label className="text-xs text-slate-500 block mb-1">Player {p.charAt(1)} Name</label>
+                             <input type="text" value={championData[`${p}Name`]} onChange={e=>setChampionData({...championData, [`${p}Name`]: e.target.value})} className="w-full bg-slate-900 p-2 rounded text-sm font-bold outline-none text-white border border-slate-700"/>
+                          </div>
+                          <div>
+                             <label className="text-xs text-slate-500 block mb-1">Player Image</label>
+                             <ImageUploadBox value={championData[`${p}Img`]} onChange={val=>setChampionData({...championData, [`${p}Img`]: val})} placeholder="Upload Player Photo" />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                 </div>
+              )}
+
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
