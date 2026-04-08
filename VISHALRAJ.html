@@ -1,0 +1,652 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VALIX OBS Overlay</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    body { margin: 0; padding: 0; background: transparent; overflow: hidden; width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center; }
+  </style>
+</head>
+<body>
+  <div id="root" style="width: 100%; height: 100%;"></div>
+
+  <script type="text/babel" data-type="module">
+    const { useState, useEffect } = React;
+
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js';
+    import { getFirestore, doc, onSnapshot } from 'https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js';
+    import { getAuth, signInAnonymously } from 'https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js';
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyBg8W_wQtL-MSTDCUQYuwDM8yJQcrmgYJo",
+      authDomain: "esports-4f486.firebaseapp.com",
+      databaseURL: "https://esports-4f486-default-rtdb.firebaseio.com",
+      projectId: "esports-4f486",
+      storageBucket: "esports-4f486.firebasestorage.app",
+      messagingSenderId: "17334130126",
+      appId: "1:17334130126:web:1ad0c0f092eeb06f66479f"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+    const tournamentDocRef = doc(db, 'artifacts', 'bgis_live_2026', 'public', 'data', 'tournament', 'live_data');
+
+    const App = () => {
+      const [user, setUser] = useState(null);
+      const [activeScreen, setActiveScreen] = useState(1);
+      const [scale, setScale] = useState(1);
+
+      const [timerState, setTimerState] = useState({ status: 'idle', remaining: 3600, endTime: null });
+      const [displayTime, setDisplayTime] = useState(3600);
+
+      const [teamsData, setTeamsData] = useState([]);
+      const [schedule, setSchedule] = useState([]);
+      const [standingsMeta, setStandingsMeta] = useState({ pointSubtitle: "MATCH", overallSubtitle: "OVERALL" });
+      const [liveScreenMeta, setLiveScreenMeta] = useState({
+        timerMinutes: 60, tournamentName: "VALIX ARENA", dayTitle: "GRAND FINALS - DAY 1", matchTitle: "MATCH 1: ERANGEL", teamListGroup1: "SLOTS 1-8", teamListGroup2: "SLOTS 9-16", tickerText: "",
+        prizeTotal: "5000", prize1: "2600", prize2: "1300", prize3: "800", prizeKill: "300", prizeInfo: "3 DAYS TOURNAMENT | 9 MATCHES"
+      });
+      const [topTeamStats, setTopTeamStats] = useState({teamName: "TEAM", damage: 0, heals: 0, knocks: 0, headshots: 0, avgSurv: "00:00", player1: "", player2: "", player3: "", player4: ""});
+      const [wwcdData, setWwcdData] = useState({teamName: "WINNER", matchInfo: "MATCH", p1Name: "P1", p1Kills: 0, p1Dmg: 0, p2Name: "P2", p2Kills: 0, p2Dmg: 0, p3Name: "P3", p3Kills: 0, p3Dmg: 0, p4Name: "P4", p4Kills: 0, p4Dmg: 0});
+      const [championData, setChampionData] = useState({
+        teamName: "VALIX ESPORTS", prize: "2600", teamLogo: "",
+        p1Name: "IGL NAME", p1Img: "", p2Name: "FRAGGER 1", p2Img: "", p3Name: "FRAGGER 2", p3Img: "", p4Name: "SUPPORT", p4Img: ""
+      });
+
+      useEffect(() => {
+        const handleResize = () => {
+          const scaleX = window.innerWidth / 1920;
+          const scaleY = window.innerHeight / 1080;
+          setScale(Math.min(scaleX, scaleY)); 
+        };
+        handleResize(); 
+        window.addEventListener('resize', handleResize);
+        return () => window.removeEventListener('resize', handleResize);
+      }, []);
+
+      useEffect(() => {
+        const initAuth = async () => {
+          try { await signInAnonymously(auth); setUser(auth.currentUser); } 
+          catch (error) { setUser({ uid: 'unauthenticated' }); }
+        };
+        initAuth();
+      }, []);
+
+      useEffect(() => {
+        if (!user) return;
+        const unsub = onSnapshot(tournamentDocRef, (docSnap) => {
+          if (docSnap.exists()) {
+            const data = docSnap.data();
+            if(data.activeScreen) setActiveScreen(data.activeScreen);
+            if(data.teamsData) setTeamsData(data.teamsData);
+            if(data.schedule) setSchedule(data.schedule);
+            if(data.standingsMeta) setStandingsMeta(data.standingsMeta);
+            if(data.liveScreenMeta) setLiveScreenMeta(data.liveScreenMeta);
+            if(data.topTeamStats) setTopTeamStats(data.topTeamStats);
+            if(data.wwcdData) setWwcdData(data.wwcdData);
+            if(data.championData) setChampionData(data.championData);
+            if(data.timerState) setTimerState(data.timerState); 
+          }
+        });
+        return () => unsub();
+      }, [user]);
+
+      useEffect(() => {
+        let interval;
+        if (timerState.status === 'playing') {
+          const calcTime = () => Math.max(0, Math.floor((timerState.endTime - Date.now()) / 1000));
+          setDisplayTime(calcTime());
+          interval = setInterval(() => setDisplayTime(calcTime()), 500);
+        } else {
+          setDisplayTime(timerState.remaining);
+        }
+        return () => clearInterval(interval);
+      }, [timerState]);
+
+      const formatTime = (seconds) => {
+        const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+        const s = (seconds % 60).toString().padStart(2, '0');
+        return `${m}:${s}`;
+      };
+
+      const getMatchStandings = () => {
+        return [...teamsData].map(team => ({
+          ...team, matchTotal: (team.kills || 0) + (team.placementPoints || 0)
+        })).sort((a, b) => b.matchTotal - a.matchTotal || b.kills - a.kills || a.name.localeCompare(b.name));
+      };
+
+      const getOverallStandings = () => {
+        return [...teamsData].map(team => ({
+          ...team, 
+          overallTotal: (team.prevPoints || 0) + (team.kills || 0) + (team.placementPoints || 0),
+          overallKills: (team.totalKills || 0) + (team.kills || 0),
+          overallPlacePts: (team.totalPlacePts || 0) + (team.placementPoints || 0)
+        })).sort((a, b) => b.overallTotal - a.overallTotal || b.overallKills - a.overallKills || a.name.localeCompare(b.name));
+      };
+
+      const GlobalTimerWidget = () => {
+        if (displayTime <= 0 || activeScreen === 1 || activeScreen === 2) return null;
+        
+        const isDangerZone = displayTime <= 300 && displayTime > 0;
+        const widgetColor = isDangerZone ? "text-red-500 animate-heartbeat drop-shadow-[0_0_10px_rgba(220,38,38,0.8)]" : "text-white";
+        const iconColor = isDangerZone ? "text-red-500 animate-pulse" : "text-yellow-400";
+        
+        return (
+          <div className="absolute top-8 left-8 z-[100] bg-[#0a0000]/90 border border-red-900/50 backdrop-blur-md px-6 py-3 rounded-lg shadow-lg flex items-center gap-4 transition-all duration-500 ease-in-out">
+             <i className={`fas fa-clock text-2xl ${iconColor}`}></i>
+             <div className="flex flex-col">
+                <span className="text-red-200 text-[10px] font-bold tracking-[0.2em] uppercase leading-none mb-1">MATCH START IN</span>
+                <span className={`font-black text-3xl leading-none tabular-nums tracking-wider font-mono drop-shadow-sm ${widgetColor}`}>
+                   {formatTime(displayTime)}
+                </span>
+             </div>
+          </div>
+        );
+      };
+
+      const ScreenCountdown = () => {
+        const isDangerZone = displayTime <= 300 && displayTime > 60; 
+        const timerColorClass = isDangerZone 
+            ? "text-red-500 drop-shadow-[0_0_40px_rgba(220,38,38,0.8)] animate-heartbeat" 
+            : "text-white drop-shadow-[0_20px_50px_rgba(0,0,0,1)]";
+            
+        return (
+          <div className="relative w-full h-full bg-[#0a0000] flex flex-col items-center justify-center overflow-hidden font-sans pb-10">
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(92,0,0,0.4)_0%,rgba(10,0,0,1)_70%)]"></div>
+            <div className="absolute inset-0 opacity-[0.05] bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] animate-pan-bg-slow mix-blend-overlay"></div>
+
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[1200px] h-[1200px] border-[2px] border-[#FFD700]/20 rounded-full animate-spin-slow pointer-events-none">
+               <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[2px] h-20 bg-[#FFD700]/40"></div>
+               <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-[2px] h-20 bg-[#FFD700]/40"></div>
+               <div className="absolute left-0 top-1/2 -translate-y-1/2 h-[2px] w-20 bg-[#FFD700]/40"></div>
+               <div className="absolute right-0 top-1/2 -translate-y-1/2 h-[2px] w-20 bg-[#FFD700]/40"></div>
+            </div>
+
+            <div className="absolute inset-0 z-10 pointer-events-none opacity-40 mix-blend-screen">
+               <img src="https://pngimg.com/uploads/pubg/pubg_PNG33.png" className="absolute top-[15%] left-[5%] w-[600px] brightness-0 sepia-[1] hue-rotate-[10deg] saturate-[5] animate-float1 drop-shadow-[0_0_15px_rgba(255,215,0,0.3)]" alt="Gun"/>
+               <img src="https://pngimg.com/uploads/pubg/pubg_PNG43.png" className="absolute bottom-[10%] right-[10%] w-[350px] brightness-0 sepia-[1] hue-rotate-[10deg] saturate-[5] animate-float2 drop-shadow-[0_0_15px_rgba(255,215,0,0.3)] transform scale-x-[-1]" alt="Helmet"/>
+            </div>
+
+            <div className="z-20 w-full max-w-[1600px] flex items-center justify-between px-16 relative">
+               <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[2px] h-[600px] bg-gradient-to-b from-transparent via-[#FFD700] to-transparent opacity-30"></div>
+               <div className="flex-1 flex justify-center pl-10 pr-20">
+                  <div className="flex flex-col items-center justify-center p-12 bg-[#240202]/60 border border-[#FFD700]/30 backdrop-blur-md rounded-2xl shadow-[0_0_50px_rgba(255,215,0,0.1)] relative overflow-hidden group w-full max-w-[600px]">
+                     <div className="absolute w-full h-[2px] bg-[#FFD700]/60 shadow-[0_0_10px_#FFD700] animate-scanline top-0 left-0"></div>
+                     <div className="text-transparent bg-clip-text bg-gradient-to-b from-[#FFF5C3] via-[#FFD700] to-[#B8860B] font-black text-[70px] leading-[1.1] tracking-tighter text-center drop-shadow-[0_5px_15px_rgba(0,0,0,1)] uppercase py-2">
+                        {liveScreenMeta.tournamentName || "VALIX ARENA"}
+                     </div>
+                     <div className="flex gap-4 mt-6">
+                        <div className="bg-[#5c0000] text-white font-black text-[22px] px-6 py-1.5 tracking-[0.3em] uppercase shadow-lg border border-[#7a0808]">ESPORTS</div>
+                        <div className="bg-gradient-to-r from-[#FFD700] to-[#E5A91A] text-black font-black text-[22px] px-6 py-1.5 tracking-[0.3em] uppercase shadow-lg">LIVE</div>
+                     </div>
+                  </div>
+               </div>
+
+               <div className="flex-1 flex flex-col items-center justify-center pl-20">
+                  <div className="flex items-center gap-4 mb-2">
+                     <i className={`fas fa-crosshairs text-[40px] ${isDangerZone ? 'text-red-500 animate-spin-slow' : 'text-[#FFD700]'}`}></i>
+                     <div className={`${isDangerZone ? 'text-red-500 animate-pulse' : 'text-[#FFD700]'} font-black text-[40px] tracking-[0.3em] uppercase drop-shadow-[0_0_15px_rgba(255,215,0,0.4)]`}>DEPLOYING IN</div>
+                  </div>
+                  
+                  <div className={`font-black text-[380px] leading-[0.85] tabular-nums tracking-wider font-mono ${timerColorClass}`}>
+                     {formatTime(displayTime)}
+                  </div>
+                  
+                  <div className="mt-8 bg-[#1a0101]/80 border border-[#FFD700]/50 px-10 py-3 rounded text-[#FFD700] font-bold text-2xl tracking-[0.4em] uppercase shadow-[0_0_30px_rgba(255,215,0,0.15)]">
+                     {liveScreenMeta.dayTitle} &bull; {liveScreenMeta.matchTitle}
+                  </div>
+               </div>
+            </div>
+
+            <div className="absolute bottom-0 left-0 w-full h-[55px] bg-gradient-to-r from-[#E5A91A] via-[#FFD700] to-[#E5A91A] flex items-center overflow-hidden border-t-[6px] border-[#3a0000] z-40 shadow-[0_-10px_30px_rgba(0,0,0,0.8)]">
+               <div className="flex w-max animate-marquee-ticker whitespace-nowrap text-[#3a0000] font-black text-[26px] tracking-[0.15em] uppercase">
+                  <div className="flex shrink-0">{Array(15).fill(`${liveScreenMeta.tickerText || "WELCOME TO VALIX ARENA ESPORTS"}`).join(' • ')} •&nbsp;</div>
+                  <div className="flex shrink-0">{Array(15).fill(`${liveScreenMeta.tickerText || "WELCOME TO VALIX ARENA ESPORTS"}`).join(' • ')} •&nbsp;</div>
+               </div>
+            </div>
+            <div className="absolute top-10 right-10 flex gap-2 opacity-50 z-10"><div className="w-10 h-10 border-t-4 border-r-4 border-[#FFD700]"></div></div>
+          </div>
+        );
+      };
+
+      const ScreenPlayingTeams = () => {
+        const gridCols = teamsData.length > 16 ? 'grid-cols-5' : 'grid-cols-4';
+        const isDangerZone = displayTime <= 300 && displayTime > 0;
+        return (
+          <div className="relative w-full h-full bg-[#0a0000] bg-gradient-to-br from-[#3a0000] via-[#1a0000] to-[#0a0000] flex flex-col items-center overflow-hidden font-sans">
+            <div className="absolute top-16 -left-32 w-[600px] h-[40px] bg-[#FFD700] -rotate-45 flex items-center overflow-hidden border-y-[4px] border-[#3a0000] z-20 shadow-[0_5px_20px_rgba(255,215,0,0.3)]">
+               <div className="flex w-[200%] animate-marquee-left whitespace-nowrap text-[#3a0000] font-black text-[20px] tracking-[0.15em] uppercase">{Array(20).fill('VALIX ARENA // ').join('')}</div>
+            </div>
+            <div className="w-full flex flex-col items-center mt-14 z-20 animate-slide-in-down">
+               <div className="text-transparent bg-clip-text bg-gradient-to-b from-[#FFF5C3] via-[#FFD700] to-[#B8860B] font-bold tracking-[0.3em] mb-1 drop-shadow-md text-xl">{liveScreenMeta.tournamentName}</div>
+               <h1 className="text-6xl font-black text-white tracking-[0.2em] uppercase drop-shadow-[0_10px_20px_rgba(0,0,0,0.8)]">PLAYING TEAMS</h1>
+            </div>
+            <div className="z-20 w-full max-w-[1500px] mt-10 flex justify-center">
+               <div className={`grid ${gridCols} gap-6 w-full animate-fade-in-up`} style={{animationDelay: '0.2s'}}>
+                  {teamsData.map((team, i) => (
+                    <div key={team.id} className="relative bg-[#1a0101]/80 backdrop-blur-md border border-[#FFD700]/30 rounded-xl overflow-hidden flex items-center p-3 shadow-[0_10px_30px_rgba(0,0,0,0.6)] transition-transform hover:scale-105 border-b-4 border-b-[#FFD700]">
+                       <div className="absolute top-0 right-0 bg-[#FFD700] text-[#3a0000] font-black text-xs px-3 py-1 rounded-bl-lg shadow-md z-10">#{i + 1 < 10 ? `0${i+1}` : i+1}</div>
+                       <div className="w-16 h-16 bg-[#0a0000] rounded-lg p-1 shrink-0 flex items-center justify-center border border-[#3a0000]"><img src={team.logo} className="w-full h-full object-contain" alt=""/></div>
+                       <div className="ml-4 flex-1 pr-6"><div className="text-white font-black text-lg uppercase tracking-wider truncate drop-shadow-md">{team.name}</div></div>
+                    </div>
+                  ))}
+               </div>
+            </div>
+            <div className="absolute bottom-10 right-14 flex flex-col items-end z-30">
+               <div className={`${isDangerZone ? 'text-red-500 animate-pulse' : 'text-[#FFD700]'} font-black text-xl tracking-[0.2em] mb-[-10px] uppercase drop-shadow-[0_2px_5px_rgba(0,0,0,0.8)]`}>STARTING IN</div>
+               <div className={`${isDangerZone ? 'text-red-500 drop-shadow-[0_0_20px_rgba(220,38,38,0.8)] animate-heartbeat' : 'text-white drop-shadow-[0_10px_20px_rgba(0,0,0,0.8)]'} font-black text-[90px] leading-none tabular-nums tracking-wider font-mono`}>{formatTime(displayTime)}</div>
+            </div>
+          </div>
+        );
+      };
+
+      const ScreenRecap = () => {
+        const sorted = getMatchStandings().slice(0, 5); 
+        return (
+          <div className="w-full h-full bg-[#00FF00] p-12 flex flex-col items-center justify-center relative overflow-hidden font-sans">
+            <div className="w-full max-w-4xl bg-[#0a0000]/95 border-[3px] border-[#FFD700]/50 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.8)] flex flex-col overflow-hidden animate-slide-in-down">
+               <div className="bg-gradient-to-r from-[#4a0404] to-[#1a0101] p-6 flex justify-between items-center border-b-4 border-[#FFD700]">
+                  <div><h1 className="text-4xl font-black text-white tracking-widest italic uppercase drop-shadow-md">MATCH RECAP</h1><h2 className="text-[#FFD700] font-bold tracking-[0.3em] uppercase mt-1">{liveScreenMeta.matchTitle}</h2></div>
+                  <i className="fas fa-trophy text-[48px] text-[#FFD700]"></i>
+               </div>
+               <div className="p-8 flex flex-col gap-6">
+                  <div className="flex bg-gradient-to-r from-[#240202] to-[#1a0101] rounded-lg overflow-hidden border border-[#7a0808] shadow-lg">
+                     <div className="w-1/3 p-4 flex items-center justify-center bg-[#FFD700] text-[#3a0000] font-black text-2xl tracking-widest relative"><i className="fas fa-crown text-[16px] text-[#3a0000]/50 absolute top-2 left-2"></i>{topTeamStats.teamName}</div>
+                     <div className="flex-1 flex justify-around p-4 text-white text-center">
+                        <div><div className="text-[10px] text-yellow-200/70 font-black tracking-widest mb-1">DAMAGE</div><div className="text-3xl font-black text-white drop-shadow-sm">{topTeamStats.damage}</div></div>
+                        <div><div className="text-[10px] text-yellow-200/70 font-black tracking-widest mb-1">HEALS</div><div className="text-3xl font-black text-white drop-shadow-sm">{topTeamStats.heals}</div></div>
+                        <div><div className="text-[10px] text-yellow-200/70 font-black tracking-widest mb-1">KNOCKS</div><div className="text-3xl font-black text-white drop-shadow-sm">{topTeamStats.knocks}</div></div>
+                     </div>
+                  </div>
+                  <div className="flex flex-col gap-[3px]">
+                     <div className="flex text-yellow-200 text-[11px] font-black tracking-widest px-4 pb-2 border-b-2 border-red-800/50 uppercase"><div className="w-10 text-center">#</div><div className="flex-1 pl-2">TEAM</div><div className="w-20 text-center">PLACE</div><div className="w-20 text-center">FINISH</div><div className="w-24 text-center">TOTAL</div></div>
+                     {sorted.map((team, i) => (
+                        <div key={team.id} className="flex items-center px-4 py-3 bg-[#140202] rounded border-l-4 border-yellow-500 text-white shadow-sm">
+                           <div className="w-10 text-center font-black text-lg text-slate-400">{i+1}</div>
+                           <div className="flex-1 pl-2 font-bold flex items-center gap-3"><img src={team.logo} className="w-6 h-6 bg-[#0a0000] p-[2px] border border-[#3a0000] rounded object-contain" alt=""/><span className="uppercase tracking-wider text-base">{team.name}</span></div>
+                           <div className="w-20 text-center text-red-100 font-bold text-base">{team.placementPoints}</div>
+                           <div className="w-20 text-center text-red-100 font-bold text-base">{team.kills}</div>
+                           <div className="w-24 text-center font-black text-2xl text-[#FFD700] drop-shadow-md">{team.matchTotal}</div>
+                        </div>
+                     ))}
+                  </div>
+               </div>
+            </div>
+          </div>
+        );
+      };
+
+      const ScreenLiveStandings = () => {
+        const sorted = getOverallStandings(); const half = Math.ceil(sorted.length / 2); const ROW_HEIGHT = 44;
+        return (
+          <div className="w-full h-full bg-[#00FF00] p-10 flex flex-col items-center justify-center relative z-0 overflow-hidden font-sans">
+            <div className="flex flex-col items-center z-10 bg-[#0a0000]/90 backdrop-blur-md px-16 py-4 rounded-t-3xl border-x-4 border-t-4 border-[#FFD700] shadow-[0_0_30px_rgba(255,215,0,0.2)]">
+               <div className="flex items-center gap-4 mb-1"><div className="w-3 h-3 bg-red-500 rounded-full animate-ping"></div><h1 className="text-5xl font-black text-white tracking-widest">LIVE STANDINGS</h1><div className="w-3 h-3 bg-red-500 rounded-full animate-ping"></div></div>
+               <h2 className="text-[#FFD700] font-bold tracking-[0.3em] uppercase text-xl">{liveScreenMeta.matchTitle}</h2>
+            </div>
+            <div className="relative z-10 w-full max-w-[1400px] flex flex-col bg-[#0a0000]/95 border-4 border-[#7a0808] rounded-b-3xl rounded-t-xl shadow-[0_20px_50px_rgba(0,0,0,0.8)] p-8">
+               <div className="flex w-full gap-8 shrink-0">
+                 <div className="flex-1 flex text-yellow-200/80 text-xs font-black px-3 pb-2 border-b-2 border-red-800/50"><div className="w-8">#</div><div className="flex-1">TEAM</div><div className="w-16 text-center">POS</div><div className="w-16 text-center">FIN</div><div className="w-20 text-center">TOTAL</div></div>
+                 <div className="flex-1 flex text-yellow-200/80 text-xs font-black px-3 pb-2 border-b-2 border-red-800/50"><div className="w-8">#</div><div className="flex-1">TEAM</div><div className="w-16 text-center">POS</div><div className="w-16 text-center">FIN</div><div className="w-20 text-center">TOTAL</div></div>
+               </div>
+               <div className="relative w-full overflow-hidden mt-4" style={{ height: `${Math.ceil(sorted.length / 2) * ROW_HEIGHT}px` }}>
+                 {sorted.map((team, i) => {
+                    const isCol2 = i >= half; const colIndex = isCol2 ? i - half : i; const leftPos = isCol2 ? 'calc(50% + 16px)' : '0%'; const rowWidth = 'calc(50% - 16px)'; const rank = i + 1; const isEliminated = team.eliminated === 4;
+                    return (
+                      <div key={team.id} className={`absolute flex items-center px-4 rounded border-l-4 text-sm transition-all duration-[800ms] ease-in-out ${rank === 1 && !isEliminated ? 'bg-gradient-to-r from-[#4a0404] to-transparent border-[#FFD700] text-white' : 'bg-[#140202] border-[#7a0808] text-white'} ${isEliminated ? 'opacity-50' : ''}`} style={{ height: `${ROW_HEIGHT - 4}px`, width: rowWidth, left: leftPos, transform: `translateY(${colIndex * ROW_HEIGHT}px)` }}>
+                        <div className={`w-8 font-black ${rank === 1 && !isEliminated ? 'text-[#FFD700]' : 'text-slate-400'}`}>{rank < 10 ? `0${rank}` : rank}</div>
+                        <div className="flex-1 font-bold truncate pr-2 flex items-center gap-2"><img src={team.logo} className="w-5 h-5 bg-[#0a0000] border border-[#3a0000] rounded-sm object-contain" alt=""/><span className="uppercase">{team.name}</span></div>
+                        <div className="w-16 text-center text-red-100">{team.placementPoints}</div><div className="w-16 text-center text-red-100">{team.kills}</div><div className={`w-20 text-center font-black text-xl ${rank === 1 && !isEliminated ? 'text-[#FFD700] drop-shadow-[0_0_5px_rgba(255,215,0,0.5)]' : 'text-white'}`}>{team.overallTotal}</div>
+                      </div>
+                    )
+                 })}
+               </div>
+            </div>
+          </div>
+        );
+      };
+
+      const ScreenSchedule = () => (
+        <div className="relative w-full h-full bg-[#0a0000] flex flex-col items-center justify-center overflow-hidden font-sans">
+          <div className="absolute inset-0 bg-gradient-to-br from-[#3a0000]/40 via-[#0a0000] to-[#5c0000]/20"></div>
+          <div className="z-10 flex flex-col items-center mb-12">
+             <h1 className="text-[70px] font-black text-white tracking-widest uppercase drop-shadow-[0_0_20px_rgba(255,215,0,0.2)]"><span className="text-transparent bg-clip-text bg-gradient-to-b from-[#FFF5C3] via-[#FFD700] to-[#B8860B]">MATCH</span> SCHEDULE</h1>
+             <div className="flex items-center gap-4 mt-2"><div className="w-12 h-1 bg-[#FFD700]"></div><div className="bg-[#FFD700] text-[#3a0000] font-black tracking-[0.3em] px-8 py-1 rounded-sm uppercase text-xl">{liveScreenMeta.dayTitle}</div><div className="w-12 h-1 bg-[#FFD700]"></div></div>
+          </div>
+          <div className="z-10 w-full max-w-5xl flex flex-col gap-5">
+             {schedule.map((s, i) => (
+               <div key={i} className="flex items-center bg-[#240202]/60 backdrop-blur-md border border-[#FFD700]/20 rounded-xl p-6 shadow-lg transform transition-all border-l-4 border-l-[#FFD700]" style={{animationDelay: `${i * 0.15}s`}}>
+                 <div className="text-[#FFD700]/40 font-black text-5xl w-24 text-center">0{i+1}</div>
+                 <div className="flex-1 flex flex-col pl-8 border-l-2 border-[#7a0808]">
+                   <div className="text-slate-400 font-bold tracking-[0.4em] text-sm mb-1 uppercase flex items-center gap-2"><i className="fas fa-users text-[#FFD700]"></i> {s.group}</div>
+                   <div className="text-white font-black text-4xl tracking-widest uppercase drop-shadow-md">{s.map}</div>
+                 </div>
+                 <div className="bg-[#1a0101]/80 text-[#FFD700] border border-[#FFD700]/50 font-black text-3xl tracking-widest px-10 py-4 rounded-lg flex items-center gap-3"><i className="fas fa-clock text-2xl"></i>{s.time}</div>
+               </div>
+             ))}
+          </div>
+        </div>
+      );
+
+      const ScreenPrizePool = () => (
+        <div className="relative w-full h-full bg-[#0a0000] flex flex-col items-center justify-center overflow-hidden font-sans">
+          <div className="absolute inset-0 bg-gradient-to-b from-[#3a0000]/40 via-[#0a0000] to-[#5c0000]/20"></div>
+          <div className="absolute inset-0 opacity-[0.05] bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] animate-pan-bg-slow mix-blend-overlay"></div>
+
+          <div className="absolute top-0 left-1/2 -translate-x-1/2 bg-gradient-to-b from-[#FFD700] to-[#B8860B] px-16 py-3 rounded-b-3xl shadow-[0_10px_30px_rgba(255,215,0,0.3)] z-20 animate-slide-in-down border-x-4 border-b-4 border-[#3a0000]">
+             <h2 className="text-[#3a0000] font-black tracking-[0.4em] text-2xl uppercase drop-shadow-sm">{liveScreenMeta.prizeInfo}</h2>
+          </div>
+
+          <div className="z-10 flex flex-col items-center mt-12 mb-10 animate-fade-in-up" style={{animationDelay: '0.1s'}}>
+             <div className="text-transparent bg-clip-text bg-gradient-to-b from-[#FFF5C3] via-[#FFD700] to-[#B8860B] font-black text-[120px] tracking-widest uppercase drop-shadow-[0_0_30px_rgba(255,215,0,0.2)] leading-none mb-2"><i className="fas fa-trophy mr-6 text-[#FFD700]"></i>PRIZE POOL</div>
+             <div className="text-[140px] font-black text-white drop-shadow-[0_10px_30px_rgba(0,0,0,0.8)] leading-none tracking-tighter flex items-center gap-4" style={{ textShadow: '4px 4px 0px #3a0000, 0 0 50px rgba(255,215,0,0.3)' }}><span className="text-[#FFD700]">₹</span>{liveScreenMeta.prizeTotal}</div>
+          </div>
+
+          <div className="z-10 flex gap-8 w-full max-w-[1400px] justify-center items-end animate-fade-in-up" style={{animationDelay: '0.3s'}}>
+             <div className="flex flex-col items-center bg-[#1a0101]/90 backdrop-blur-md border-t-4 border-[#C0C0C0] rounded-xl p-8 shadow-[0_15px_40px_rgba(0,0,0,0.8)] w-[340px] transform hover:-translate-y-4 transition-transform duration-300 mb-6 border border-[#C0C0C0]/20">
+                <div className="bg-[#C0C0C0]/20 w-24 h-24 rounded-full flex items-center justify-center mb-4 border border-[#C0C0C0]/50 shadow-[0_0_20px_rgba(192,192,192,0.4)]"><span className="text-[#C0C0C0] font-black text-4xl">2ND</span></div>
+                <div className="text-[#C0C0C0] font-black text-2xl tracking-widest mb-2 uppercase">RUNNER UP</div>
+                <div className="text-6xl font-black text-white drop-shadow-md">₹{liveScreenMeta.prize2}</div>
+             </div>
+             <div className="flex flex-col items-center bg-gradient-to-b from-[#3a0000] to-[#1a0101] backdrop-blur-md border-t-4 border border-[#FFD700]/80 rounded-xl p-12 shadow-[0_0_60px_rgba(255,215,0,0.3)] w-[400px] transform hover:-translate-y-4 transition-transform duration-300 z-20 relative">
+                <div className="absolute -top-10 bg-[#FFD700] text-[#3a0000] w-20 h-20 rounded-full flex items-center justify-center font-black text-3xl border-4 border-[#1a0101] shadow-[0_0_20px_rgba(255,215,0,0.6)]">1ST</div>
+                <i className="fas fa-crown text-[80px] text-[#FFD700] mb-4 mt-4 drop-shadow-[0_0_20px_rgba(255,215,0,0.6)]"></i>
+                <div className="text-[#FFD700] font-black text-3xl tracking-widest mb-2 uppercase">CHAMPION</div>
+                <div className="text-7xl font-black text-white drop-shadow-[0_5px_15px_rgba(0,0,0,0.8)]">₹{liveScreenMeta.prize1}</div>
+             </div>
+             <div className="flex flex-col items-center bg-[#1a0101]/90 backdrop-blur-md border-t-4 border-[#CD7F32] rounded-xl p-8 shadow-[0_15px_40px_rgba(0,0,0,0.8)] w-[340px] transform hover:-translate-y-4 transition-transform duration-300 mb-6 border border-[#CD7F32]/20">
+                <div className="bg-[#CD7F32]/20 w-24 h-24 rounded-full flex items-center justify-center mb-4 border border-[#CD7F32]/50 shadow-[0_0_20px_rgba(205,127,50,0.4)]"><span className="text-[#CD7F32] font-black text-4xl">3RD</span></div>
+                <div className="text-[#CD7F32] font-black text-2xl tracking-widest mb-2 uppercase">3RD PLACE</div>
+                <div className="text-6xl font-black text-white drop-shadow-md">₹{liveScreenMeta.prize3}</div>
+             </div>
+          </div>
+          <div className="z-10 mt-10 animate-fade-in-up" style={{animationDelay: '0.5s'}}>
+             <div className="flex items-center gap-6 bg-gradient-to-r from-[#3a0000] to-[#140000] border-2 border-red-600 px-16 py-6 rounded-2xl shadow-[0_10px_40px_rgba(220,38,38,0.4)] transform hover:scale-105 transition-transform duration-300">
+                <div className="flex items-center justify-center w-16 h-16 bg-red-600/20 rounded-full border border-red-500/50"><i className="fas fa-fire text-red-500 text-4xl animate-pulse"></i></div>
+                <div><div className="text-red-300 font-bold tracking-[0.4em] text-sm mb-1 uppercase">TOP FRAGGER</div><div className="text-white font-black text-4xl tracking-wider uppercase drop-shadow-md">HIGHEST KILL <span className="text-[#FFD700] ml-4 text-5xl">₹{liveScreenMeta.prizeKill}</span></div></div>
+             </div>
+          </div>
+        </div>
+      );
+
+      const ScreenChampions = () => (
+        <div className="relative w-full h-full bg-[#0a0000] flex flex-col items-center justify-center overflow-hidden font-sans">
+          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(92,0,0,0.8)_0%,rgba(10,0,0,1)_80%)]"></div>
+          <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-[0.05] animate-pan-bg-slow mix-blend-overlay"></div>
+          <div className="absolute top-1/2 left-1/2 w-[1000px] h-[1000px] bg-[#FFD700]/10 blur-[120px] rounded-full -translate-x-1/2 -translate-y-1/2 animate-spin-slow"></div>
+
+          <div className="z-10 text-center mb-8 animate-slide-in-down mt-10">
+             <h2 className="text-[#FFD700] text-3xl font-black tracking-[0.6em] uppercase mb-2 drop-shadow-[0_0_10px_rgba(255,215,0,0.5)]"><i className="fas fa-star mr-4 text-xl"></i> CONGRATULATIONS <i className="fas fa-star ml-4 text-xl"></i></h2>
+             <h1 className="text-[120px] font-black text-transparent bg-clip-text bg-gradient-to-b from-[#FFF5C3] via-[#FFD700] to-[#B8860B] uppercase italic drop-shadow-[0_20px_50px_rgba(0,0,0,0.8)] leading-none" style={{ filter: 'drop-shadow(0px 10px 20px rgba(255,215,0,0.2))' }}>TOURNAMENT CHAMPIONS</h1>
+          </div>
+
+          <div className="z-10 flex flex-col items-center mb-10 animate-fade-in-up" style={{animationDelay: '0.2s'}}>
+             <div className="relative w-[220px] h-[220px] bg-[#0a0000] border-[6px] border-[#FFD700] rounded-3xl p-4 shadow-[0_0_60px_rgba(255,215,0,0.6)] mb-6 transform hover:scale-110 transition-transform duration-500 z-20 flex items-center justify-center">
+                <img src={championData.teamLogo || `https://ui-avatars.com/api/?name=${championData.teamName}&background=5C0000&color=FFD700`} className="w-full h-full object-contain filter drop-shadow-lg" alt="Team Logo" />
+                <div className="absolute -top-6 -right-6 text-5xl text-[#FFD700] drop-shadow-[0_0_15px_rgba(255,215,0,1)] animate-pulse"><i className="fas fa-crown"></i></div>
+             </div>
+             <div className="text-[80px] font-black text-white drop-shadow-[0_5px_20px_rgba(0,0,0,0.9)] tracking-widest uppercase text-center leading-none">{championData.teamName}</div>
+             <div className="mt-6 bg-gradient-to-r from-[#3a0000] to-[#5c0000] text-[#FFD700] font-black text-4xl tracking-[0.2em] px-12 py-3 rounded-full border-2 border-[#FFD700] shadow-[0_10px_30px_rgba(255,215,0,0.3)] flex items-center gap-4">
+                <i className="fas fa-money-bill-wave"></i> WINNINGS : ₹{championData.prize}
+             </div>
+          </div>
+
+          <div className="z-10 flex gap-10 mt-4 animate-fade-in-up w-full max-w-[1600px] justify-center" style={{animationDelay: '0.4s'}}>
+             {['p1', 'p2', 'p3', 'p4'].map((p, i) => (
+                <div key={i} className="flex flex-col items-center relative group">
+                   <div className="w-[280px] h-[360px] bg-[#1a0101] border-[3px] border-[#7a0808] rounded-2xl overflow-hidden shadow-[0_15px_40px_rgba(0,0,0,0.9)] relative transition-all duration-300 group-hover:border-[#FFD700] group-hover:shadow-[0_0_30px_rgba(255,215,0,0.4)] group-hover:-translate-y-3">
+                      <div className="absolute inset-0 bg-gradient-to-t from-[#0a0000] via-[#0a0000]/60 to-transparent z-10"></div>
+                      <img src={championData[`${p}Img`] || `https://ui-avatars.com/api/?name=${championData[`${p}Name`] || 'P'}&background=5C0000&color=FFD700&size=256`} className="w-full h-full object-cover object-top relative z-0 transition-transform duration-500 group-hover:scale-110" alt="Player" />
+                      <div className="absolute bottom-0 left-0 w-full p-5 z-20 flex flex-col items-center">
+                         <div className="w-10 h-1 bg-[#FFD700] mb-3 rounded-full"></div>
+                         <div className="text-white font-black text-2xl uppercase tracking-wider drop-shadow-md text-center">{championData[`${p}Name`]}</div>
+                      </div>
+                   </div>
+                </div>
+             ))}
+          </div>
+
+          <div className="absolute inset-0 pointer-events-none z-0 overflow-hidden opacity-50">
+             <div className="absolute top-[20%] left-[20%] w-2 h-2 bg-[#FFD700] rounded-full animate-ping"></div>
+             <div className="absolute top-[40%] right-[30%] w-3 h-3 bg-white rounded-full animate-ping" style={{animationDelay: '1s'}}></div>
+             <div className="absolute bottom-[30%] left-[40%] w-2 h-2 bg-[#FFD700] rounded-full animate-ping" style={{animationDelay: '2s'}}></div>
+             <div className="absolute top-[60%] right-[10%] w-4 h-4 bg-[#FFD700] rounded-full animate-ping" style={{animationDelay: '0.5s'}}></div>
+          </div>
+        </div>
+      );
+
+      const ScreenWWCD = () => (
+        <div className="w-full h-full relative overflow-hidden flex flex-col items-center justify-center p-12 bg-[#0a0000]">
+          <div className="absolute inset-0 bg-gradient-to-tr from-[#3a0000]/60 via-[#E5A91A]/20 to-[#0a0000]"></div>
+          <div className="absolute top-0 left-1/2 w-[1000px] h-[1000px] bg-[#FFD700]/10 blur-[100px] rounded-full -translate-x-1/2 -translate-y-1/2 animate-spin-slow"></div>
+          <div className="z-10 text-center mb-12 animate-slide-in-down">
+            <h2 className="text-[#FFD700] text-2xl font-black tracking-[0.5em] uppercase mb-2 drop-shadow-lg">WINNER WINNER CHICKEN DINNER</h2>
+            <h1 className="text-[100px] font-black text-white uppercase italic drop-shadow-[0_10px_30px_rgba(255,215,0,0.3)] leading-none">{wwcdData.teamName}</h1>
+            <div className="inline-block mt-6 bg-[#3a0000] border border-[#FFD700]/50 px-8 py-2 rounded-full text-[#FFD700] font-bold tracking-widest text-lg shadow-lg">{wwcdData.matchInfo}</div>
+          </div>
+          <div className="z-10 flex gap-6 w-full max-w-6xl animate-fade-in-up" style={{animationDelay: '0.2s'}}>
+             {[{name:wwcdData.p1Name, k:wwcdData.p1Kills, d:wwcdData.p1Dmg}, {name:wwcdData.p2Name, k:wwcdData.p2Kills, d:wwcdData.p2Dmg}, {name:wwcdData.p3Name, k:wwcdData.p3Kills, d:wwcdData.p3Dmg}, {name:wwcdData.p4Name, k:wwcdData.p4Kills, d:wwcdData.p4Dmg}].map((p, i) => (
+               <div key={i} className="flex-1 bg-[#1a0101]/90 border-t-4 border-[#FFD700] rounded-xl overflow-hidden backdrop-blur-md shadow-[0_10px_30px_rgba(0,0,0,0.8)] hover:-translate-y-2 transition-transform">
+                  <div className="p-6 text-center">
+                    <h3 className="text-white font-black text-xl italic mb-4 uppercase">{p.name}</h3>
+                    <div className="flex justify-between items-center bg-[#0a0000] p-3 rounded-lg border border-[#3a0000]">
+                      <div className="text-left"><div className="text-red-200 text-xs font-bold uppercase">Finishes</div><div className="text-[#FFD700] font-black text-2xl">{p.k}</div></div>
+                      <div className="text-right"><div className="text-red-200 text-xs font-bold uppercase">Damage</div><div className="text-white font-bold text-xl">{p.d}</div></div>
+                    </div>
+                  </div>
+               </div>
+             ))}
+          </div>
+        </div>
+      );
+
+      const ScreenMatchPointStandings = () => {
+        const sorted = getMatchStandings(); const half = Math.ceil(sorted.length / 2); const ROW_HEIGHT = 44;
+        return (
+          <div className="w-full h-full bg-[#1a0101] bg-gradient-to-br from-[#240202] to-[#0a0000] p-10 flex flex-col relative z-0 overflow-hidden font-sans">
+            <div className="flex flex-col items-center mt-2 z-10 animate-slide-in-down"><h1 className="text-5xl font-black text-white tracking-wider">POINT STANDINGS</h1><h2 className="text-[#FFD700] font-bold tracking-[0.3em] mt-1 uppercase">{standingsMeta.pointSubtitle}</h2></div>
+            <div className="flex bg-[#3a0000] rounded-lg mt-4 mb-4 overflow-hidden border border-[#7a0808] z-10 shrink-0 shadow-[0_0_30px_rgba(92,0,0,0.6)]">
+               <div className="w-1/3 p-4 flex items-center justify-center bg-[#5c0000] text-white font-black text-3xl tracking-widest relative border-r border-[#7a0808]"><div className="absolute left-4 top-4 text-xs font-black bg-black/30 px-2 py-1 rounded text-[#FFD700]">01</div>{topTeamStats.teamName}</div>
+               <div className="flex-1 flex justify-around p-4 text-white text-center">
+                  <div><div className="text-sm text-yellow-200/70 font-bold tracking-widest">DAMAGE</div><div className="text-4xl font-black">{topTeamStats.damage}</div></div>
+                  <div><div className="text-sm text-yellow-200/70 font-bold tracking-widest">HEALS</div><div className="text-4xl font-black">{topTeamStats.heals}</div></div>
+                  <div><div className="text-sm text-yellow-200/70 font-bold tracking-widest">KNOCKS</div><div className="text-4xl font-black">{topTeamStats.knocks}</div></div>
+               </div>
+            </div>
+            <div className="relative z-10 flex-1 w-full overflow-hidden flex flex-col">
+               <div className="flex w-full gap-4 shrink-0">
+                 <div className="flex-1 flex text-yellow-200/80 text-xs font-black px-3 pb-2 border-b-2 border-red-800/50"><div className="w-8">#</div><div className="flex-1">TEAM</div><div className="w-16 text-center">POS</div><div className="w-16 text-center">FIN</div><div className="w-20 text-center">TOTAL</div></div>
+                 <div className="flex-1 flex text-yellow-200/80 text-xs font-black px-3 pb-2 border-b-2 border-red-800/50"><div className="w-8">#</div><div className="flex-1">TEAM</div><div className="w-16 text-center">POS</div><div className="w-16 text-center">FIN</div><div className="w-20 text-center">TOTAL</div></div>
+               </div>
+               <div className="relative w-full flex-1 mt-2">
+                 {sorted.map((team, i) => {
+                    const isCol2 = i >= half; const colIndex = isCol2 ? i - half : i; const leftPos = isCol2 ? 'calc(50% + 8px)' : '0%'; const rowWidth = 'calc(50% - 8px)'; const rank = i + 1;
+                    return (
+                      <div key={team.id} className={`absolute flex items-center px-3 rounded border-l-4 text-sm transition-all duration-[800ms] ease-in-out ${rank === 1 ? 'bg-gradient-to-r from-[#4a0404] to-[#240202] border-[#FFD700] text-white' : 'bg-[#0f0000] border-[#7a0808] text-white'}`} style={{ height: `${ROW_HEIGHT - 4}px`, width: rowWidth, left: leftPos, transform: `translateY(${colIndex * ROW_HEIGHT}px)` }}>
+                        <div className={`w-8 font-black ${rank === 1 ? 'text-[#FFD700]' : 'text-slate-400'}`}>{rank < 10 ? `0${rank}` : rank}</div>
+                        <div className="flex-1 font-bold truncate pr-2 flex items-center gap-2"><img src={team.logo} className="w-4 h-4 bg-[#0a0000] p-[1px] rounded-sm object-contain" alt=""/><span className="uppercase">{team.name}</span></div>
+                        <div className="w-16 text-center text-red-100">{team.placementPoints}</div><div className="w-16 text-center text-red-100">{team.kills}</div><div className={`w-20 text-center font-black text-lg ${rank === 1 ? 'text-[#FFD700]' : 'text-white'}`}>{team.matchTotal}</div>
+                      </div>
+                    )
+                 })}
+               </div>
+            </div>
+          </div>
+        );
+      };
+
+      const ScreenOverallProStandings = () => {
+        const sorted = getOverallStandings().slice(0, 16); const half = Math.ceil(sorted.length / 2); const ROW_HEIGHT = 44;
+        return (
+          <div className="w-full h-full bg-[#1a0101] bg-gradient-to-br from-[#240202] to-[#0a0000] p-10 flex flex-col relative z-0 overflow-hidden font-sans">
+            <div className="flex flex-col items-center mt-2 z-10 animate-slide-in-down"><h1 className="text-5xl font-black text-white tracking-wider">OVERALL STANDINGS</h1><h2 className="text-[#FFD700] font-bold tracking-[0.3em] mt-1 uppercase">{standingsMeta.overallSubtitle}</h2></div>
+            <div className="flex bg-[#3a0000] rounded-lg mt-4 mb-4 overflow-hidden border border-[#7a0808] z-10 shrink-0 shadow-[0_0_30px_rgba(92,0,0,0.6)]">
+               <div className="w-1/3 p-4 flex items-center justify-center bg-[#5c0000] text-white font-black text-3xl tracking-widest relative border-r border-[#7a0808]"><div className="absolute left-4 top-4 text-xs font-black bg-black/30 px-2 py-1 rounded text-[#FFD700]">01</div>{topTeamStats.teamName}</div>
+               <div className="flex-1 flex justify-around p-4 text-white text-center">
+                  <div><div className="text-sm text-yellow-200/70 font-bold tracking-widest">DAMAGE</div><div className="text-4xl font-black">{topTeamStats.damage}</div></div>
+                  <div><div className="text-sm text-yellow-200/70 font-bold tracking-widest">AVG SURV</div><div className="text-4xl font-black">{topTeamStats.avgSurv}</div></div>
+                  <div><div className="text-sm text-yellow-200/70 font-bold tracking-widest">KNOCKS</div><div className="text-4xl font-black">{topTeamStats.knocks}</div></div>
+               </div>
+            </div>
+            <div className="relative z-10 flex-1 w-full overflow-hidden flex flex-col">
+               <div className="flex w-full gap-4 shrink-0">
+                 <div className="flex-1 flex text-yellow-200/80 text-xs font-black px-3 pb-2 border-b-2 border-red-800/50"><div className="w-8">#</div><div className="flex-1">TEAM</div><div className="w-12 text-center">MAT</div><div className="w-16 text-center">PLC PTS</div><div className="w-16 text-center">FINISHES</div><div className="w-20 text-center">TOTAL</div></div>
+                 <div className="flex-1 flex text-yellow-200/80 text-xs font-black px-3 pb-2 border-b-2 border-red-800/50"><div className="w-8">#</div><div className="flex-1">TEAM</div><div className="w-12 text-center">MAT</div><div className="w-16 text-center">PLC PTS</div><div className="w-16 text-center">FINISHES</div><div className="w-20 text-center">TOTAL</div></div>
+               </div>
+               <div className="relative w-full flex-1 mt-2">
+                 {sorted.map((team, i) => {
+                    const isCol2 = i >= half; const colIndex = isCol2 ? i - half : i; const leftPos = isCol2 ? 'calc(50% + 8px)' : '0%'; const rowWidth = 'calc(50% - 8px)'; const rank = i + 1;
+                    return (
+                      <div key={team.id} className={`absolute flex items-center px-3 rounded border-l-4 text-sm transition-all duration-[800ms] ease-in-out ${rank === 1 ? 'bg-gradient-to-r from-[#4a0404] to-[#240202] border-[#FFD700] text-white' : 'bg-[#0f0000] border-[#7a0808] text-white'}`} style={{ height: `${ROW_HEIGHT - 4}px`, width: rowWidth, left: leftPos, transform: `translateY(${colIndex * ROW_HEIGHT}px)` }}>
+                        <div className={`w-8 font-black ${rank === 1 ? 'text-[#FFD700]' : 'text-slate-400'}`}>{rank < 10 ? `0${rank}` : rank}</div>
+                        <div className="flex-1 font-bold truncate pr-2 flex items-center gap-2"><img src={team.logo} className="w-4 h-4 bg-[#0a0000] p-[1px] rounded-sm object-contain" alt=""/><span className="uppercase">{team.name}</span></div>
+                        <div className="w-12 text-center text-red-100">{team.matches}</div><div className="w-16 text-center text-red-100">{team.overallPlacePts}</div><div className="w-16 text-center text-red-100">{team.overallKills}</div><div className={`w-20 text-center font-black text-lg ${rank === 1 ? 'text-[#FFD700]' : 'text-white'}`}>{team.overallTotal}</div>
+                      </div>
+                    )
+                 })}
+               </div>
+            </div>
+          </div>
+        );
+      };
+
+      const ScreenLiveHUD = () => {
+        const sorted = getOverallStandings().slice(0, 16);
+        const titleParts = liveScreenMeta.matchTitle.split(':');
+        const matchPrefix = titleParts[0] || liveScreenMeta.dayTitle;
+        const mapName = titleParts[1]?.trim() || liveScreenMeta.matchTitle;
+        const ROW_HEIGHT = 36; 
+        return (
+          <div className="w-full h-full relative overflow-hidden font-sans bg-[#00FF00]">
+            <div className="absolute bottom-10 left-10 flex shadow-2xl">
+               <div className="bg-[#3a0000] px-4 py-2 rounded-l flex items-center justify-center border-r border-[#7a0808]"><i className="fas fa-shield-alt text-[48px] text-[#FFD700]"></i></div>
+               <div className="flex flex-col rounded-r overflow-hidden shadow-[5px_5px_15px_rgba(0,0,0,0.5)]">
+                  <div className="bg-[#FFD700] text-[#3a0000] text-xs font-black tracking-widest px-4 py-1.5 flex items-center h-8">{matchPrefix}</div>
+                  <div className="bg-white text-[#5c0000] text-4xl font-black tracking-wider px-4 flex-1 flex items-center uppercase italic h-14">{mapName}</div>
+               </div>
+            </div>
+            <div className="absolute top-[180px] right-0 w-[360px] bg-[#0a0000] flex flex-col font-sans shadow-[-10px_10px_30px_rgba(0,0,0,0.6)] border-y-2 border-l-2 border-[#7a0808] rounded-l-2xl z-30 overflow-hidden">
+               <div className="flex items-center text-yellow-200/70 text-[10px] font-black tracking-widest px-4 h-9 shrink-0 bg-[#1a0101] border-b-2 border-[#7a0808] z-30">
+                  <div className="w-6 text-center">#</div><div className="flex-1 pl-3">TEAM</div><div className="w-10 text-center">FIN.</div><div className="w-14 text-center">TOT.</div><div className="w-14 text-center">STATUS</div>
+               </div>
+               <div className="relative flex-1 w-full overflow-hidden" style={{ height: `${sorted.length * ROW_HEIGHT}px` }}>
+                  {sorted.map((team, i) => {
+                     const isEliminated = team.eliminated === 4; const statusBars = [];
+                     for(let k=0; k<team.alive; k++) statusBars.push('bg-[#e2e2e2]'); for(let k=0; k<team.knocked; k++) statusBars.push('bg-yellow-500'); for(let k=0; k<team.eliminated; k++) statusBars.push('bg-[#3a0a0a]'); while(statusBars.length < 4) statusBars.push('bg-[#3a0a0a]');
+                     return (
+                       <div key={team.id} className={`absolute w-full flex items-center px-4 border-b border-[#240202] transition-all duration-[800ms] ease-in-out ${isEliminated ? 'opacity-50' : 'bg-[#0a0000]'}`} style={{ height: `${ROW_HEIGHT}px`, transform: `translateY(${i * ROW_HEIGHT}px)`, backgroundColor: i % 2 === 0 ? '#140202' : '#0a0000' }}>
+                          <div className={`w-6 text-center font-black text-xs ${i===0 && !isEliminated ? 'text-[#FFD700]' : 'text-white'}`}>{i + 1}</div>
+                          <div className="flex-1 pl-3 flex items-center gap-2 overflow-hidden"><img src={team.logo} className="w-4 h-4 bg-[#0a0000] border border-[#3a0000] p-[1px] rounded-[2px] object-contain" alt=""/><span className="font-bold text-xs text-white truncate tracking-wider">{team.name.length > 6 ? team.name.substring(0, 5) + '..' : team.name}</span></div>
+                          <div className="w-10 text-center font-bold text-xs text-red-100">{team.kills}</div><div className={`w-14 text-center font-black text-sm ${i===0 && !isEliminated ? 'text-[#FFD700]' : 'text-white'}`}>{team.overallTotal}</div>
+                          <div className="w-14 flex justify-center gap-[2px] h-[12px]">{statusBars.map((colorClass, idx) => (<div key={idx} className={`w-[3px] h-full rounded-sm ${colorClass}`}></div>))}</div>
+                       </div>
+                     )
+                  })}
+               </div>
+               <div className="h-7 bg-[#1a0101] border-t-2 border-[#7a0808] flex justify-end items-center px-4 gap-4 text-[8px] font-black text-yellow-200/70 tracking-widest shrink-0 z-30"><div className="flex items-center gap-1"><div className="w-2 h-2 rounded-sm bg-[#e2e2e2]"></div> ALIVE</div></div>
+            </div>
+          </div>
+        );
+      };
+
+      const renderScreen = () => {
+        // 🔥 OVERRIDE: THE FINAL DEPLOYMENT (LAST 60 SECONDS)
+        if (displayTime <= 60 && displayTime > 0 && timerState.status === 'playing') {
+          return (
+            <div className="w-full h-full relative overflow-hidden bg-[#0a0000] font-sans">
+              <div className="absolute inset-0 filter blur-[15px] brightness-[0.3] transform scale-110 pointer-events-none">
+                 {ScreenLiveHUD()}
+              </div>
+              <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0%,rgba(92,0,0,0.8)_100%)] z-10 pointer-events-none"></div>
+
+              <div className="absolute inset-0 z-20 flex flex-col items-center justify-center">
+                 <div className="flex items-center justify-center w-28 h-28 bg-red-600/20 rounded-full border-4 border-red-500 mb-6 shadow-[0_0_50px_rgba(220,38,38,0.6)]">
+                    <i className="fas fa-exclamation-triangle text-red-500 text-6xl animate-ping"></i>
+                 </div>
+                 <h2 className="text-[#FFD700] font-black text-5xl tracking-[0.5em] uppercase mb-[-30px] drop-shadow-[0_0_20px_rgba(255,215,0,0.6)] z-30 relative">
+                    FINAL DEPLOYMENT
+                 </h2>
+                 <div className="text-[500px] font-black text-transparent bg-clip-text bg-gradient-to-b from-white via-red-200 to-red-700 leading-[0.9] tabular-nums font-mono tracking-tighter relative z-20 animate-heartbeat" style={{ filter: 'drop-shadow(0px 20px 40px rgba(220,38,38,1))' }}>
+                    {displayTime}
+                 </div>
+                 <div className="bg-gradient-to-r from-[#3a0000] to-[#1a0000] border-2 border-red-600 px-12 py-4 rounded-full text-red-200 font-black text-3xl tracking-[0.4em] uppercase shadow-[0_0_40px_rgba(220,38,38,0.5)] mt-4">
+                    {liveScreenMeta.tournamentName} • MATCH STARTING
+                 </div>
+              </div>
+            </div>
+          );
+        }
+
+        // Normal Routing
+        let effectiveScreen = activeScreen;
+        if (displayTime === 0 && timerState.status === 'playing') {
+           effectiveScreen = 8;
+        }
+
+        // FIXED: Using function calls instead of JSX tags to prevent full screen remounting every second
+        switch(effectiveScreen) {
+          case 1: return ScreenCountdown(); 
+          case 2: return ScreenPlayingTeams(); 
+          case 3: return ScreenRecap(); 
+          case 4: return ScreenLiveStandings(); 
+          case 5: return ScreenSchedule(); 
+          case 6: return ScreenPrizePool(); 
+          case 7: return ScreenChampions(); 
+          case 8: return ScreenLiveHUD(); 
+          case 9: return ScreenWWCD(); 
+          case 10: return ScreenMatchPointStandings(); 
+          case 11: return ScreenOverallProStandings(); 
+          default: return <div className="text-white flex h-full items-center justify-center text-4xl font-bold bg-[#0a0000]">Select Screen from Admin</div>;
+        }
+      };
+
+      return (
+        <div style={{ width: '100vw', height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+          <div style={{ width: '1920px', height: '1080px', transform: `scale(${scale})`, transformOrigin: 'center', position: 'relative' }} className="bg-transparent overflow-hidden font-sans">
+            <style dangerouslySetInnerHTML={{__html: `
+              @keyframes premiumScreenIn { 0% { opacity: 0; transform: scale(1.04); filter: blur(12px) brightness(1.5); } 100% { opacity: 1; transform: scale(1); filter: blur(0px) brightness(1); } }
+              .animate-premium-screen-in { animation: premiumScreenIn 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards; width: 100%; height: 100%; }
+              @keyframes float1 { 0% { transform: translateY(0px) rotate(15deg); } 50% { transform: translateY(-30px) rotate(18deg); } 100% { transform: translateY(0px) rotate(15deg); } }
+              @keyframes float2 { 0% { transform: translateY(0px) rotate(-20deg); } 50% { transform: translateY(-20px) rotate(-22deg); } 100% { transform: translateY(0px) rotate(-20deg); } }
+              @keyframes float3 { 0% { transform: translateY(0px) rotate(-45deg); } 50% { transform: translateY(-40px) rotate(-40deg); } 100% { transform: translateY(0px) rotate(-45deg); } }
+              @keyframes marqueeLeft { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+              @keyframes marqueeRight { from { transform: translateX(-50%); } to { transform: translateX(0); } }
+              @keyframes marqueeTicker { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
+              @keyframes slideInDown { from { transform: translateY(-50px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+              @keyframes fadeInUp { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }
+              @keyframes panBgSlow { 0% { background-position: 0 0; } 100% { background-position: 100px 100px; } }
+              @keyframes scanline { 0% { top: 0%; opacity: 0; } 10% { opacity: 1; } 90% { opacity: 1; } 100% { top: 100%; opacity: 0; } }
+              @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+              @keyframes heartbeat { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.08); } }
+              
+              .animate-marquee-left { animation: marqueeLeft 20s linear infinite; } .animate-marquee-right { animation: marqueeRight 20s linear infinite; }
+              .animate-marquee-ticker { animation: marqueeTicker 40s linear infinite; }
+              .animate-float1 { animation: float1 8s ease-in-out infinite; } .animate-float2 { animation: float2 10s ease-in-out infinite; } .animate-float3 { animation: float3 9s ease-in-out infinite reverse; }
+              .animate-slide-in-down { animation: slideInDown 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards; opacity: 0; } .animate-fade-in-up { animation: fadeInUp 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards; opacity: 0; }
+              .animate-pan-bg-slow { animation: panBgSlow 10s linear infinite; } .animate-scanline { animation: scanline 4s linear infinite; }
+              .animate-spin-slow { animation: spin 30s linear infinite; }
+              .animate-heartbeat { animation: heartbeat 1s ease-in-out infinite; display: inline-block; }
+            `}} />
+            
+            <GlobalTimerWidget />
+            
+            <div key={activeScreen} className="animate-premium-screen-in w-full h-full">
+              {renderScreen()}
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
